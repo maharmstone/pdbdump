@@ -113,7 +113,9 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
 
     fmt::print("enum {} {{\n", name);
 
-    walk_fieldlist(fl, [](span<const uint8_t> d) {
+    bool first = true;
+
+    walk_fieldlist(fl, [&](span<const uint8_t> d) {
         const auto& e = *(lf_enumerate*)d.data();
 
         if (e.kind != cv_type::LF_ENUMERATE)
@@ -173,13 +175,17 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
         if (auto st = name.find('\0'); st != string::npos)
             name = name.substr(0, st);
 
-        // FIXME - trailing comma
+        if (!first)
+            fmt::print(",\n");
+
         // FIXME - omit value if follows on from previous
 
-        fmt::print("    {} = {},\n", name, value);
+        fmt::print("    {} = {}", name, value);
+
+        first = false;
     });
 
-    fmt::print("}};\n\n");
+    fmt::print("\n}};\n\n");
 }
 
 static void extract_types(bfd* types_stream) {
