@@ -5,6 +5,106 @@
 
 using namespace std;
 
+static void walk_fieldlist(span<const uint8_t> fl, invocable<span<const uint8_t>> auto func) {
+    if (fl.size() < sizeof(cv_type))
+        throw formatted_error("Field list was truncated.");
+
+    auto kind = *(cv_type*)fl.data();
+
+    // FIXME - formatter
+    if (kind != cv_type::LF_FIELDLIST)
+        throw formatted_error("Type kind was {:x}, expected LF_FIELDLIST.", (uint16_t)kind);
+
+    fl = fl.subspan(sizeof(cv_type));
+
+    while (!fl.empty()) {
+        if (fl.size() < sizeof(cv_type))
+            throw formatted_error("Field list was truncated.");
+
+        auto kind = *(cv_type*)fl.data();
+
+        switch (kind) {
+            case cv_type::LF_ENUMERATE: {
+                if (fl.size() < offsetof(lf_enumerate, name))
+                    throw formatted_error("Truncated LF_ENUMERATE ({} bytes, expected at least {})", fl.size(), offsetof(lf_enumerate, name));
+
+                const auto& en = *(lf_enumerate*)fl.data();
+
+                if (en.value >= 0x8000)
+                    throw runtime_error("FIXME - large enum values"); // FIXME
+
+                auto name = string_view(en.name, fl.size() - offsetof(lf_enumerate, name));
+
+                if (auto st = name.find('\0'); st != string::npos)
+                    name = name.substr(0, st);
+                else
+                    throw runtime_error("No terminating null found in LF_ENUMERATE name.");
+
+                auto len = offsetof(lf_enumerate, name) + name.size() + 1;
+
+                if (len & 3)
+                    len += 4 - (len & 3);
+
+                if (len > fl.size())
+                    throw formatted_error("Field list was truncated.");
+
+                func(span(fl.data(), len));
+
+                fl = fl.subspan(len);
+
+                break;
+            }
+
+            // FIXME - other types
+
+            default:
+                throw formatted_error("Unhandled field list subtype {:x}", (uint16_t)kind);
+        }
+    }
+}
+
+static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
+    if (t.size() < offsetof(lf_enum, name))
+        throw formatted_error("Truncated LF_ENUM ({} bytes, expected at least {})", t.size(), offsetof(lf_enum, name));
+
+    const auto& en = *(struct lf_enum*)t.data();
+
+    // FIXME - print underlying type if not what is implied
+
+    if (en.field_list < h.type_index_begin || en.field_list >= h.type_index_end)
+        throw formatted_error("Enum field list {:x} was out of bounds.", en.field_list);
+
+    const auto& fl = types[en.field_list - h.type_index_begin];
+
+    auto name = string_view((char*)t.data() + offsetof(lf_enum, name), t.size() - offsetof(lf_enum, name));
+
+    if (auto st = name.find('\0'); st != string::npos)
+        name = name.substr(0, st);
+
+    fmt::print("enum {} {{\n", name);
+
+    walk_fieldlist(fl, [](span<const uint8_t> d) {
+        const auto& e = *(lf_enumerate*)d.data();
+
+        if (e.kind != cv_type::LF_ENUMERATE)
+            throw formatted_error("Type {:x} found in enum field list, expected LF_ENUMERATE.", (uint16_t)e.kind);
+
+        // FIXME - large types
+
+        auto name = string_view(e.name, d.size() - offsetof(lf_enumerate, name));
+
+        if (auto st = name.find('\0'); st != string::npos)
+            name = name.substr(0, st);
+
+        // FIXME - trailing comma
+        // FIXME - omit value if follows on from previous
+
+        fmt::print("    {} = {},\n", name, e.value);
+    });
+
+    fmt::print("}};\n\n");
+}
+
 static void extract_types(bfd* types_stream) {
     pdb_tpi_stream_header h;
     vector<uint8_t> type_records;
@@ -27,7 +127,7 @@ static void extract_types(bfd* types_stream) {
         throw runtime_error("bfd_bread failed");
 
     span sp(type_records);
-    vector<span<uint8_t>> types;
+    vector<span<const uint8_t>> types;
 
     types.reserve(h.type_index_end - h.type_index_begin);
 
@@ -47,7 +147,31 @@ static void extract_types(bfd* types_stream) {
         sp = sp.subspan(len);
     }
 
-    // FIXME - print types
+    uint32_t cur_type = h.type_index_begin;
+
+    for (const auto& t : types) {
+        if (t.size() < sizeof(cv_type))
+            continue;
+
+        auto kind = *(cv_type*)t.data();
+
+        try {
+            switch (kind) {
+                case cv_type::LF_ENUM:
+                    print_enum(t, h, types);
+                    break;
+
+                // FIXME - LF_STRUCTURE / LF_CLASS
+
+                default:
+                    break;
+            }
+        } catch (const exception& e) {
+            fmt::print(stderr, "Error parsing type {:x}: {}\n", cur_type, e.what());
+        }
+
+        cur_type++;
+    }
 }
 
 static void load_file(const string& fn) {
