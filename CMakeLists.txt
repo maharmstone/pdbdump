@@ -17,3 +17,8 @@ add_executable(pdbdump ${SRC_FILES})
 if(NOT MSVC)
     target_compile_options(pdbdump PUBLIC -Wall -Werror=cast-function-type -Wno-expansion-to-defined -Wunused-parameter -Wtype-limits -Wextra -Wconversion)
 endif()
+
+add_definitions(-DPACKAGE)
+add_definitions(-DPACKAGE_VERSION)
+
+target_link_libraries(pdbdump bfd)
