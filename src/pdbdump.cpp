@@ -1,5 +1,6 @@
 #include <iostream>
 #include <vector>
+#include <span>
 #include "pdbdump.h"
 
 using namespace std;
@@ -25,7 +26,28 @@ static void extract_types(bfd* types_stream) {
     if (bfd_bread(type_records.data(), type_records.size(), types_stream) != type_records.size())
         throw runtime_error("bfd_bread failed");
 
-    // FIXME - allocate buffers for types
+    span sp(type_records);
+    vector<span<uint8_t>> types;
+
+    types.reserve(h.type_index_end - h.type_index_begin);
+
+    while (!sp.empty()) {
+        if (sp.size() < sizeof(uint16_t))
+            throw runtime_error("type_records was truncated");
+
+        auto len = *(uint16_t*)sp.data();
+
+        sp = sp.subspan(sizeof(uint16_t));
+
+        if (sp.size() < len)
+            throw runtime_error("type_records was truncated");
+
+        types.emplace_back(sp.data(), len);
+
+        sp = sp.subspan(len);
+    }
+
+    // FIXME - print types
 }
 
 static void load_file(const string& fn) {
