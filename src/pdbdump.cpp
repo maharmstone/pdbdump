@@ -114,6 +114,7 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
     fmt::print("enum {} {{\n", name);
 
     bool first = true;
+    int64_t exp_val = 0;
 
     walk_fieldlist(fl, [&](span<const uint8_t> d) {
         const auto& e = *(lf_enumerate*)d.data();
@@ -178,10 +179,12 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
         if (!first)
             fmt::print(",\n");
 
-        // FIXME - omit value if follows on from previous
+        if (value == exp_val)
+            fmt::print("    {}", name, value);
+        else
+            fmt::print("    {} = {}", name, value);
 
-        fmt::print("    {} = {}", name, value);
-
+        exp_val = value + 1;
         first = false;
     });
 
