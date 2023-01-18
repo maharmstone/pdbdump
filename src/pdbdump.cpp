@@ -1,21 +1,32 @@
-#include <string>
-#include <memory>
 #include <iostream>
-#include <bfd.h>
+#include <vector>
+#include "pdbdump.h"
 
 using namespace std;
 
-class bfd_closer {
-public:
-    using pointer = bfd*;
+static void extract_types(bfd* types_stream) {
+    pdb_tpi_stream_header h;
+    vector<uint8_t> type_records;
 
-    void operator()(bfd* b) {
-        if (b)
-            bfd_close(b);
-    }
-};
+    if (bfd_seek(types_stream, 0, SEEK_SET))
+        throw runtime_error("bfd_seek failed");
 
-using bfdup = unique_ptr<bfd*, bfd_closer>;
+    if (bfd_bread(&h, sizeof(h), types_stream) != sizeof(h))
+        throw runtime_error("bfd_bread failed");
+
+    if (h.version != TPI_STREAM_VERSION_80)
+        throw formatted_error("Type stream version was {}, expected {}.", h.version, TPI_STREAM_VERSION_80);
+
+    if (bfd_seek(types_stream, h.header_size, SEEK_SET))
+        throw runtime_error("bfd_seek failed");
+
+    type_records.resize(h.type_record_bytes);
+
+    if (bfd_bread(type_records.data(), type_records.size(), types_stream) != type_records.size())
+        throw runtime_error("bfd_bread failed");
+
+    // FIXME - allocate buffers for types
+}
 
 static void load_file(const string& fn) {
     bfdup b;
@@ -46,7 +57,10 @@ static void load_file(const string& fn) {
         count++;
     }
 
-    printf("arch = %p, types_stream = %p\n", b.get(), types_stream);
+    if (!types_stream)
+        throw runtime_error("Could not extract types stream 0002.");
+
+    extract_types(types_stream);
 }
 
 int main() {
