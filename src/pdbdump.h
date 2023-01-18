@@ -74,6 +74,106 @@ enum class cv_type : uint16_t {
     LF_UQUADWORD = 0x800a
 };
 
+template<>
+struct fmt::formatter<enum cv_type> {
+    constexpr auto parse(format_parse_context& ctx) {
+        auto it = ctx.begin();
+
+        if (it != ctx.end() && *it != '}')
+            throw format_error("invalid format");
+
+        return it;
+    }
+
+    template<typename format_context>
+    auto format(enum cv_type t, format_context& ctx) const {
+        switch (t) {
+            case cv_type::LF_VTSHAPE:
+                return fmt::format_to(ctx.out(), "LF_VTSHAPE");
+            case cv_type::LF_MODIFIER:
+                return fmt::format_to(ctx.out(), "LF_MODIFIER");
+            case cv_type::LF_POINTER:
+                return fmt::format_to(ctx.out(), "LF_POINTER");
+            case cv_type::LF_PROCEDURE:
+                return fmt::format_to(ctx.out(), "LF_PROCEDURE");
+            case cv_type::LF_MFUNCTION:
+                return fmt::format_to(ctx.out(), "LF_MFUNCTION");
+            case cv_type::LF_ARGLIST:
+                return fmt::format_to(ctx.out(), "LF_ARGLIST");
+            case cv_type::LF_FIELDLIST:
+                return fmt::format_to(ctx.out(), "LF_FIELDLIST");
+            case cv_type::LF_BITFIELD:
+                return fmt::format_to(ctx.out(), "LF_BITFIELD");
+            case cv_type::LF_METHODLIST:
+                return fmt::format_to(ctx.out(), "LF_METHODLIST");
+            case cv_type::LF_BCLASS:
+                return fmt::format_to(ctx.out(), "LF_BCLASS");
+            case cv_type::LF_VBCLASS:
+                return fmt::format_to(ctx.out(), "LF_VBCLASS");
+            case cv_type::LF_IVBCLASS:
+                return fmt::format_to(ctx.out(), "LF_IVBCLASS");
+            case cv_type::LF_INDEX:
+                return fmt::format_to(ctx.out(), "LF_INDEX");
+            case cv_type::LF_VFUNCTAB:
+                return fmt::format_to(ctx.out(), "LF_VFUNCTAB");
+            case cv_type::LF_ENUMERATE:
+                return fmt::format_to(ctx.out(), "LF_ENUMERATE");
+            case cv_type::LF_ARRAY:
+                return fmt::format_to(ctx.out(), "LF_ARRAY");
+            case cv_type::LF_CLASS:
+                return fmt::format_to(ctx.out(), "LF_CLASS");
+            case cv_type::LF_STRUCTURE:
+                return fmt::format_to(ctx.out(), "LF_STRUCTURE");
+            case cv_type::LF_UNION:
+                return fmt::format_to(ctx.out(), "LF_UNION");
+            case cv_type::LF_ENUM:
+                return fmt::format_to(ctx.out(), "LF_ENUM");
+            case cv_type::LF_MEMBER:
+                return fmt::format_to(ctx.out(), "LF_MEMBER");
+            case cv_type::LF_STMEMBER:
+                return fmt::format_to(ctx.out(), "LF_STMEMBER");
+            case cv_type::LF_METHOD:
+                return fmt::format_to(ctx.out(), "LF_METHOD");
+            case cv_type::LF_NESTTYPE:
+                return fmt::format_to(ctx.out(), "LF_NESTTYPE");
+            case cv_type::LF_ONEMETHOD:
+                return fmt::format_to(ctx.out(), "LF_ONEMETHOD");
+            case cv_type::LF_VFTABLE:
+                return fmt::format_to(ctx.out(), "LF_VFTABLE");
+            case cv_type::LF_FUNC_ID:
+                return fmt::format_to(ctx.out(), "LF_FUNC_ID");
+            case cv_type::LF_MFUNC_ID:
+                return fmt::format_to(ctx.out(), "LF_MFUNC_ID");
+            case cv_type::LF_BUILDINFO:
+                return fmt::format_to(ctx.out(), "LF_BUILDINFO");
+            case cv_type::LF_SUBSTR_LIST:
+                return fmt::format_to(ctx.out(), "LF_SUBSTR_LIST");
+            case cv_type::LF_STRING_ID:
+                return fmt::format_to(ctx.out(), "LF_STRING_ID");
+            case cv_type::LF_UDT_SRC_LINE:
+                return fmt::format_to(ctx.out(), "LF_UDT_SRC_LINE");
+            case cv_type::LF_UDT_MOD_SRC_LINE:
+                return fmt::format_to(ctx.out(), "LF_UDT_MOD_SRC_LINE");
+            case cv_type::LF_CHAR:
+                return fmt::format_to(ctx.out(), "LF_CHAR");
+            case cv_type::LF_SHORT:
+                return fmt::format_to(ctx.out(), "LF_SHORT");
+            case cv_type::LF_USHORT:
+                return fmt::format_to(ctx.out(), "LF_USHORT");
+            case cv_type::LF_LONG:
+                return fmt::format_to(ctx.out(), "LF_LONG");
+            case cv_type::LF_ULONG:
+                return fmt::format_to(ctx.out(), "LF_ULONG");
+            case cv_type::LF_QUADWORD:
+                return fmt::format_to(ctx.out(), "LF_QUADWORD");
+            case cv_type::LF_UQUADWORD:
+                return fmt::format_to(ctx.out(), "LF_UQUADWORD");
+            default:
+                return fmt::format_to(ctx.out(), "{:x}", (uint16_t)t);
+        }
+    }
+};
+
 // HDR in tpi.h
 struct pdb_tpi_stream_header {
     uint32_t version;

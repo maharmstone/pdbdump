@@ -23,7 +23,7 @@ static unsigned int extended_value_len(cv_type type) {
             return 8;
 
         default:
-            throw formatted_error("Unrecognized extended value type {:x}", (uint16_t)type);
+            throw formatted_error("Unrecognized extended value type {}", type);
     }
 }
 
@@ -33,9 +33,8 @@ static void walk_fieldlist(span<const uint8_t> fl, invocable<span<const uint8_t>
 
     auto kind = *(cv_type*)fl.data();
 
-    // FIXME - formatter
     if (kind != cv_type::LF_FIELDLIST)
-        throw formatted_error("Type kind was {:x}, expected LF_FIELDLIST.", (uint16_t)kind);
+        throw formatted_error("Type kind was {}, expected LF_FIELDLIST.", kind);
 
     fl = fl.subspan(sizeof(cv_type));
 
@@ -88,7 +87,7 @@ static void walk_fieldlist(span<const uint8_t> fl, invocable<span<const uint8_t>
             // FIXME - other types
 
             default:
-                throw formatted_error("Unhandled field list subtype {:x}", (uint16_t)kind);
+                throw formatted_error("Unhandled field list subtype {}", kind);
         }
     }
 }
@@ -120,7 +119,7 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
         const auto& e = *(lf_enumerate*)d.data();
 
         if (e.kind != cv_type::LF_ENUMERATE)
-            throw formatted_error("Type {:x} found in enum field list, expected LF_ENUMERATE.", (uint16_t)e.kind);
+            throw formatted_error("Type {} found in enum field list, expected LF_ENUMERATE.", e.kind);
 
         size_t off = offsetof(lf_enumerate, name);
         int64_t value;
@@ -253,7 +252,7 @@ static void extract_types(bfd* types_stream) {
                     break;
             }
         } catch (const exception& e) {
-            fmt::print(stderr, "Error parsing type {:x}: {}\n", cur_type, e.what());
+            fmt::print(stderr, "Error parsing type {}: {}\n", cur_type, e.what());
         }
 
         cur_type++;
