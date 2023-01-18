@@ -20,10 +20,10 @@ using bfdup = unique_ptr<bfd*, bfd_closer>;
 static void load_file(const string& fn) {
     bfdup b;
 
+    // FIXME - show BFD errors in exceptions
+
     {
         auto arch = bfd_openr(fn.c_str(), "pdb");
-
-        // FIXME - show BFD error in exception
 
         if (!arch)
             throw runtime_error("Could not load PDB file " + fn + ".");
@@ -31,7 +31,22 @@ static void load_file(const string& fn) {
         b.reset(arch);
     }
 
-    printf("arch = %p\n", b.get());
+    if (!bfd_check_format(b.get(), bfd_archive))
+        throw runtime_error("bfd_check_format failed");
+
+    bfd* types_stream = nullptr;
+    unsigned int count = 0;
+
+    for (auto f = bfd_openr_next_archived_file(b.get(), nullptr); f; f = bfd_openr_next_archived_file(b.get(), f)) {
+        if (count == 2) {
+            types_stream = f;
+            break;
+        }
+
+        count++;
+    }
+
+    printf("arch = %p, types_stream = %p\n", b.get(), types_stream);
 }
 
 int main() {
