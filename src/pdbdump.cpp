@@ -5,6 +5,28 @@
 
 using namespace std;
 
+static unsigned int extended_value_len(cv_type type) {
+    switch (type) {
+        case cv_type::LF_CHAR:
+            return 1;
+
+        case cv_type::LF_SHORT:
+        case cv_type::LF_USHORT:
+            return 2;
+
+        case cv_type::LF_LONG:
+        case cv_type::LF_ULONG:
+            return 4;
+
+        case cv_type::LF_QUADWORD:
+        case cv_type::LF_UQUADWORD:
+            return 8;
+
+        default:
+            throw formatted_error("Unrecognized extended value type {:x}", (uint16_t)type);
+    }
+}
+
 static void walk_fieldlist(span<const uint8_t> fl, invocable<span<const uint8_t>> auto func) {
     if (fl.size() < sizeof(cv_type))
         throw formatted_error("Field list was truncated.");
@@ -30,17 +52,25 @@ static void walk_fieldlist(span<const uint8_t> fl, invocable<span<const uint8_t>
 
                 const auto& en = *(lf_enumerate*)fl.data();
 
-                if (en.value >= 0x8000)
-                    throw runtime_error("FIXME - large enum values"); // FIXME
+                size_t off = offsetof(lf_enumerate, name);
 
-                auto name = string_view(en.name, fl.size() - offsetof(lf_enumerate, name));
+                if (en.value >= 0x8000) {
+                    auto extlen = extended_value_len((cv_type)en.value);
+
+                    if (fl.size() < off + extlen)
+                        throw formatted_error("Truncated LF_ENUMERATE ({} bytes, expected at least {})", fl.size(), off + extlen);
+
+                    off += extlen;
+                }
+
+                auto name = string_view((char*)&en + off, fl.size() - off);
 
                 if (auto st = name.find('\0'); st != string::npos)
                     name = name.substr(0, st);
                 else
                     throw runtime_error("No terminating null found in LF_ENUMERATE name.");
 
-                auto len = offsetof(lf_enumerate, name) + name.size() + 1;
+                auto len = off + name.size() + 1;
 
                 if (len & 3)
                     len += 4 - (len & 3);
@@ -89,9 +119,56 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
         if (e.kind != cv_type::LF_ENUMERATE)
             throw formatted_error("Type {:x} found in enum field list, expected LF_ENUMERATE.", (uint16_t)e.kind);
 
-        // FIXME - large types
+        size_t off = offsetof(lf_enumerate, name);
+        int64_t value;
 
-        auto name = string_view(e.name, d.size() - offsetof(lf_enumerate, name));
+        // FIXME - distinguish between int64_t and uint64_t values?
+
+        if (e.value < 0x8000)
+            value = e.value;
+        else {
+            switch ((cv_type)e.value) {
+                case cv_type::LF_CHAR:
+                    value = *(int8_t*)&e.name;
+                    off += sizeof(int8_t);
+                break;
+
+                case cv_type::LF_SHORT:
+                    value = *(int16_t*)&e.name;
+                    off += sizeof(int16_t);
+                break;
+
+                case cv_type::LF_USHORT:
+                    value = *(uint16_t*)&e.name;
+                    off += sizeof(uint16_t);
+                break;
+
+                case cv_type::LF_LONG:
+                    value = *(int32_t*)&e.name;
+                    off += sizeof(int32_t);
+                break;
+
+                case cv_type::LF_ULONG:
+                    value = *(uint32_t*)&e.name;
+                    off += sizeof(uint32_t);
+                break;
+
+                case cv_type::LF_QUADWORD:
+                    value = *(int64_t*)&e.name;
+                    off += sizeof(int64_t);
+                break;
+
+                case cv_type::LF_UQUADWORD:
+                    value = *(uint64_t*)&e.name;
+                    off += sizeof(uint64_t);
+                break;
+
+                default:
+                    break;
+            }
+        }
+
+        auto name = string_view((char*)&e + off, d.size() - off);
 
         if (auto st = name.find('\0'); st != string::npos)
             name = name.substr(0, st);
@@ -99,7 +176,7 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
         // FIXME - trailing comma
         // FIXME - omit value if follows on from previous
 
-        fmt::print("    {} = {},\n", name, e.value);
+        fmt::print("    {} = {},\n", name, value);
     });
 
     fmt::print("}};\n\n");
