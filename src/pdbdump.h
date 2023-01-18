@@ -212,4 +212,30 @@ struct lf_enumerate {
     char name[];
 } __attribute__((packed));
 
+// from bitfield structure CV_prop_t in cvinfo.h
+#define CV_PROP_FORWARD_REF     0x80
+#define CV_PROP_SCOPED          0x100
+#define CV_PROP_HAS_UNIQUE_NAME 0x200
+
+// lfClass in cvinfo.h
+struct lf_class {
+    cv_type kind;
+    uint16_t num_members;
+    uint16_t properties;
+    uint32_t field_list;
+    uint32_t derived_from;
+    uint32_t vshape;
+    uint16_t length;
+    char name[];
+} __attribute__((packed));
+
+// lfMember in cvinfo.h
+struct lf_member {
+  cv_type kind;
+  uint16_t attributes;
+  uint32_t type;
+  uint16_t offset;
+  char name[];
+} __attribute__((packed));
+
 static const uint32_t TPI_STREAM_VERSION_80 = 20040203;

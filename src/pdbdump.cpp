@@ -84,6 +84,45 @@ static void walk_fieldlist(span<const uint8_t> fl, invocable<span<const uint8_t>
                 break;
             }
 
+            case cv_type::LF_MEMBER: {
+                if (fl.size() < offsetof(lf_member, name))
+                    throw formatted_error("Truncated LF_MEMBER ({} bytes, expected at least {})", fl.size(), offsetof(lf_member, name));
+
+                const auto& mem = *(lf_member*)fl.data();
+
+                size_t off = offsetof(lf_member, name);
+
+                if (mem.offset >= 0x8000) {
+                    auto extlen = extended_value_len((cv_type)mem.offset);
+
+                    if (fl.size() < off + extlen)
+                        throw formatted_error("Truncated LF_MEMBER ({} bytes, expected at least {})", fl.size(), off + extlen);
+
+                    off += extlen;
+                }
+
+                auto name = string_view((char*)&mem + off, fl.size() - off);
+
+                if (auto st = name.find('\0'); st != string::npos)
+                    name = name.substr(0, st);
+                else
+                    throw runtime_error("No terminating null found in LF_MEMBER name.");
+
+                auto len = off + name.size() + 1;
+
+                if (len & 3)
+                    len += 4 - (len & 3);
+
+                if (len > fl.size())
+                    throw formatted_error("Field list was truncated.");
+
+                func(span(fl.data(), len));
+
+                fl = fl.subspan(len);
+
+                break;
+            }
+
             // FIXME - other types
 
             default:
@@ -190,6 +229,56 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
     fmt::print("\n}};\n\n");
 }
 
+static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
+    if (t.size() < offsetof(lf_class, name))
+        throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
+
+    const auto& str = *(lf_class*)t.data();
+
+    // ignore forward declarations
+    if (str.properties & CV_PROP_FORWARD_REF)
+        return;
+
+    if (str.field_list < h.type_index_begin || str.field_list >= h.type_index_end)
+        throw formatted_error("Struct field list {:x} was out of bounds.", str.field_list);
+
+    // FIXME - derived_from
+    // FIXME - vshape
+
+    // FIXME - static_asserts (sizeof, offsetof)
+
+    const auto& fl = types[str.field_list - h.type_index_begin];
+
+    auto name = string_view(str.name, t.size() - offsetof(lf_class, name));
+
+    if (auto st = name.find('\0'); st != string::npos)
+        name = name.substr(0, st);
+
+    // FIXME - "class" instead if LF_CLASS
+    fmt::print("struct {} {{\n", name);
+
+    walk_fieldlist(fl, [&](span<const uint8_t> d) {
+        const auto& mem = *(lf_member*)d.data();
+
+        if (mem.kind != cv_type::LF_MEMBER)
+            return;
+
+        size_t off = offsetof(lf_member, name);
+
+        if (mem.offset >= 0x8000)
+            off += extended_value_len((cv_type)mem.offset);
+
+        auto name = string_view((char*)&mem + off, d.size() - off);
+
+        if (auto st = name.find('\0'); st != string::npos)
+            name = name.substr(0, st);
+
+        fmt::print("    // FIXME - {}\n", name);
+    });
+
+    fmt::print("}};\n\n");
+}
+
 static void extract_types(bfd* types_stream) {
     pdb_tpi_stream_header h;
     vector<uint8_t> type_records;
@@ -246,13 +335,16 @@ static void extract_types(bfd* types_stream) {
                     print_enum(t, h, types);
                     break;
 
-                // FIXME - LF_STRUCTURE / LF_CLASS
+                case cv_type::LF_STRUCTURE:
+                case cv_type::LF_CLASS:
+                    print_struct(t, h, types);
+                    break;
 
                 default:
                     break;
             }
         } catch (const exception& e) {
-            fmt::print(stderr, "Error parsing type {}: {}\n", cur_type, e.what());
+            fmt::print(stderr, "Error parsing type {:x}: {}\n", cur_type, e.what());
         }
 
         cur_type++;
