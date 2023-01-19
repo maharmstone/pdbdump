@@ -342,6 +342,105 @@ static string type_name(span<const uint8_t> t, const pdb_tpi_stream_header& h, c
     }
 }
 
+static size_t array_length(const lf_array& arr) {
+    // FIXME - long arrays
+
+    return arr.length_in_bytes;
+}
+
+static size_t get_type_size(uint32_t type, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
+    if (type < h.type_index_begin) {
+        if (type >> 8 == 4)
+            return 4; // 32-bit pointer
+        else if (type >> 8 == 6)
+            return 8; // 64-bit pointer
+
+        switch ((cv_builtin)type) {
+            case cv_builtin::T_HRESULT:
+                return 4;
+
+            case cv_builtin::T_CHAR:
+            case cv_builtin::T_UCHAR:
+            case cv_builtin::T_RCHAR:
+            case cv_builtin::T_INT1:
+            case cv_builtin::T_UINT1:
+            case cv_builtin::T_BOOL08:
+                return 1;
+
+            case cv_builtin::T_WCHAR:
+            case cv_builtin::T_CHAR16:
+            case cv_builtin::T_SHORT:
+            case cv_builtin::T_USHORT:
+            case cv_builtin::T_INT2:
+            case cv_builtin::T_UINT2:
+                return 2;
+
+            case cv_builtin::T_CHAR32:
+            case cv_builtin::T_LONG:
+            case cv_builtin::T_ULONG:
+            case cv_builtin::T_INT4:
+            case cv_builtin::T_UINT4:
+            case cv_builtin::T_REAL32:
+                return 4;
+
+            case cv_builtin::T_QUAD:
+            case cv_builtin::T_UQUAD:
+            case cv_builtin::T_INT8:
+            case cv_builtin::T_UINT8:
+            case cv_builtin::T_REAL64:
+                return 8;
+
+            default:
+                throw formatted_error("Could not find size of builtin type {:x}\n", type);
+        }
+    }
+
+    if (type >= h.type_index_end)
+        throw formatted_error("Type {:x} was out of bounds.", type);
+
+    const auto& t = types[type - h.type_index_begin];
+
+    if (t.size() < sizeof(cv_type))
+        throw formatted_error("Type {:x} was truncated.", type);
+
+    switch (*(cv_type*)t.data()) {
+        case cv_type::LF_POINTER: {
+            if (t.size() < sizeof(lf_pointer))
+                throw formatted_error("Pointer type {:x} was truncated.", type);
+
+            const auto& ptr = *(lf_pointer*)t.data();
+
+            return (ptr.attributes & 0x7e000) >> 13; // pointer size
+        }
+
+        case cv_type::LF_ARRAY: {
+            if (t.size() < offsetof(lf_array, name))
+                throw formatted_error("Array type {:x} was truncated.", type);
+
+            return array_length(*(lf_array*)t.data());
+        }
+
+        case cv_type::LF_STRUCTURE:
+        case cv_type::LF_CLASS: {
+            if (t.size() < offsetof(lf_class, name))
+                throw formatted_error("Structure type {:x} was truncated.", type);
+
+            const auto& str = *(lf_class*)t.data();
+
+            // FIXME
+            if (str.properties & CV_PROP_FORWARD_REF)
+                throw runtime_error("FIXME - resolve forward ref");
+
+            // FIXME - long structs
+
+            return str.length;
+        }
+
+        default:
+            throw formatted_error("Could not find size of {} type {:x}\n", *(cv_type*)t.data(), type);
+    }
+}
+
 static void print_member(span<const uint8_t> mt, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types,
                          string_view name) {
     if (mt.size() >= sizeof(cv_type) && *(cv_type*)mt.data() == cv_type::LF_ARRAY) {
@@ -351,9 +450,9 @@ static void print_member(span<const uint8_t> mt, const pdb_tpi_stream_header& h,
             throw formatted_error("Truncated LF_ARRAY ({} bytes, expected at least {})", mt.size(), offsetof(lf_array, name));
 
         string name2{name};
+        size_t num_els = array_length(*arr) / get_type_size(arr->element_type, h, types);
 
-        // FIXME - no. of elements
-        name2 += "[?" + to_string(arr->length_in_bytes) + "?]";
+        name2 += "[" + to_string(num_els) + "]";
 
         do {
             if (arr->element_type < h.type_index_begin) {
@@ -372,7 +471,10 @@ static void print_member(span<const uint8_t> mt, const pdb_tpi_stream_header& h,
             }
 
             arr = (lf_array*)mt2.data();
-            name2 += "[?" + to_string(arr->length_in_bytes) + "?]";
+
+            num_els = array_length(*arr) / get_type_size(arr->element_type, h, types);
+
+            name2 += "[" + to_string(num_els) + "]";
         } while (true);
     }
 
