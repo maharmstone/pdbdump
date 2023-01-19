@@ -5,6 +5,24 @@
 
 using namespace std;
 
+class pdb {
+public:
+    pdb(bfd* types_stream) : types_stream(types_stream) { }
+
+    void extract_types();
+    void print_struct(span<const uint8_t> t);
+    void print_enum(span<const uint8_t> t);
+    void print_member(span<const uint8_t> mt, string_view name);
+    size_t get_type_size(uint32_t type);
+    string type_name(span<const uint8_t> t);
+
+private:
+    bfd* types_stream;
+    pdb_tpi_stream_header h;
+    vector<uint8_t> type_records;
+    vector<span<const uint8_t>> types;
+};
+
 static unsigned int extended_value_len(cv_type type) {
     switch (type) {
         case cv_type::LF_CHAR:
@@ -131,7 +149,7 @@ static void walk_fieldlist(span<const uint8_t> fl, invocable<span<const uint8_t>
     }
 }
 
-static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
+void pdb::print_enum(span<const uint8_t> t) {
     if (t.size() < offsetof(lf_enum, name))
         throw formatted_error("Truncated LF_ENUM ({} bytes, expected at least {})", t.size(), offsetof(lf_enum, name));
 
@@ -289,7 +307,7 @@ static string builtin_type(uint32_t t) {
     throw formatted_error("Unhandled builtin type {:x}\n", t);
 }
 
-static string type_name(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
+string pdb::type_name(span<const uint8_t> t) {
     if (t.size() < sizeof(cv_type))
         throw formatted_error("Truncated type");
 
@@ -310,7 +328,7 @@ static string type_name(span<const uint8_t> t, const pdb_tpi_stream_header& h, c
 
             const auto& bt = types[p.base_type - h.type_index_begin];
 
-            return type_name(bt, h, types) + "*";
+            return type_name(bt) + "*";
         }
 
         case cv_type::LF_STRUCTURE:
@@ -348,7 +366,7 @@ static size_t array_length(const lf_array& arr) {
     return arr.length_in_bytes;
 }
 
-static size_t get_type_size(uint32_t type, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
+size_t pdb::get_type_size(uint32_t type) {
     if (type < h.type_index_begin) {
         if (type >> 8 == 4)
             return 4; // 32-bit pointer
@@ -441,8 +459,7 @@ static size_t get_type_size(uint32_t type, const pdb_tpi_stream_header& h, const
     }
 }
 
-static void print_member(span<const uint8_t> mt, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types,
-                         string_view name) {
+void pdb::print_member(span<const uint8_t> mt, string_view name) {
     if (mt.size() >= sizeof(cv_type) && *(cv_type*)mt.data() == cv_type::LF_ARRAY) {
         const auto* arr = (lf_array*)mt.data();
 
@@ -450,7 +467,7 @@ static void print_member(span<const uint8_t> mt, const pdb_tpi_stream_header& h,
             throw formatted_error("Truncated LF_ARRAY ({} bytes, expected at least {})", mt.size(), offsetof(lf_array, name));
 
         string name2{name};
-        size_t num_els = array_length(*arr) / get_type_size(arr->element_type, h, types);
+        size_t num_els = array_length(*arr) / get_type_size(arr->element_type);
 
         name2 += "[" + to_string(num_els) + "]";
 
@@ -466,22 +483,22 @@ static void print_member(span<const uint8_t> mt, const pdb_tpi_stream_header& h,
             const auto& mt2 = types[arr->element_type - h.type_index_begin];
 
             if (mt2.size() < sizeof(cv_type) || *(cv_type*)mt2.data() != cv_type::LF_ARRAY) {
-                fmt::print("    {} {};\n", type_name(mt2, h, types), name2);
+                fmt::print("    {} {};\n", type_name(mt2), name2);
                 return;
             }
 
             arr = (lf_array*)mt2.data();
 
-            num_els = array_length(*arr) / get_type_size(arr->element_type, h, types);
+            num_els = array_length(*arr) / get_type_size(arr->element_type);
 
             name2 += "[" + to_string(num_els) + "]";
         } while (true);
     }
 
-    fmt::print("    {} {};\n", type_name(mt, h, types), name);
+    fmt::print("    {} {};\n", type_name(mt), name);
 }
 
-static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
+void pdb::print_struct(span<const uint8_t> t) {
     if (t.size() < offsetof(lf_class, name))
         throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
 
@@ -540,16 +557,13 @@ static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, 
 
         const auto& mt = types[mem.type - h.type_index_begin];
 
-        print_member(mt, h, types, name);
+        print_member(mt, name);
     });
 
     fmt::print("}};\n\n");
 }
 
-static void extract_types(bfd* types_stream) {
-    pdb_tpi_stream_header h;
-    vector<uint8_t> type_records;
-
+void pdb::extract_types() {
     if (bfd_seek(types_stream, 0, SEEK_SET))
         throw runtime_error("bfd_seek failed");
 
@@ -568,7 +582,6 @@ static void extract_types(bfd* types_stream) {
         throw runtime_error("bfd_bread failed");
 
     span sp(type_records);
-    vector<span<const uint8_t>> types;
 
     types.reserve(h.type_index_end - h.type_index_begin);
 
@@ -599,12 +612,12 @@ static void extract_types(bfd* types_stream) {
         try {
             switch (kind) {
                 case cv_type::LF_ENUM:
-                    print_enum(t, h, types);
+                    print_enum(t);
                     break;
 
                 case cv_type::LF_STRUCTURE:
                 case cv_type::LF_CLASS:
-                    print_struct(t, h, types);
+                    print_struct(t);
                     break;
 
                 default:
@@ -650,7 +663,9 @@ static void load_file(const string& fn) {
     if (!types_stream)
         throw runtime_error("Could not extract types stream 0002.");
 
-    extract_types(types_stream);
+    pdb p(types_stream);
+
+    p.extract_types();
 }
 
 int main() {
