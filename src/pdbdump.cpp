@@ -445,9 +445,41 @@ size_t pdb::get_type_size(uint32_t type) {
 
             const auto& str = *(lf_class*)t.data();
 
-            // FIXME
-            if (str.properties & CV_PROP_FORWARD_REF)
-                throw runtime_error("FIXME - resolve forward ref");
+            if (str.properties & CV_PROP_FORWARD_REF) {
+                // resolve forward ref
+
+                auto name = string_view(str.name, t.size() - offsetof(lf_class, name));
+
+                if (auto st = name.find('\0'); st != string::npos)
+                    name = name.substr(0, st);
+
+                // FIXME - use hash stream
+
+                for (const auto& t2 : types) {
+                    if (t2.size() < sizeof(cv_type) || *(cv_type*)t2.data() != *(cv_type*)t.data())
+                        continue;
+
+                    if (t2.size() < offsetof(lf_class, name))
+                        continue;
+
+                    const auto& str2 = *(lf_class*)t2.data();
+
+                    if (str2.properties & CV_PROP_FORWARD_REF)
+                        continue;
+
+                    // FIXME - long structs
+
+                    auto name2 = string_view(str2.name, t2.size() - offsetof(lf_class, name));
+
+                    if (auto st = name2.find('\0'); st != string::npos)
+                        name2 = name2.substr(0, st);
+
+                    if (name == name2)
+                        return str2.length;
+                }
+
+                throw formatted_error("Could not resolve forward ref for struct {}.", name);
+            }
 
             // FIXME - long structs
 
