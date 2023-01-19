@@ -229,6 +229,66 @@ static void print_enum(span<const uint8_t> t, const pdb_tpi_stream_header& h, co
     fmt::print("\n}};\n\n");
 }
 
+static string builtin_type(uint32_t t) {
+    if (t >> 8 == 4 || t >> 8 == 6) // pointers
+        return builtin_type(t & 0xff) + "*";
+
+    switch ((cv_builtin)t) {
+        case cv_builtin::T_VOID:
+            return "void";
+        case cv_builtin::T_HRESULT:
+            return "HRESULT";
+        case cv_builtin::T_CHAR:
+            return "signed char";
+        case cv_builtin::T_UCHAR:
+            return "unsigned char";
+        case cv_builtin::T_RCHAR:
+            return "char";
+        case cv_builtin::T_WCHAR:
+            return "wchar_t";
+        case cv_builtin::T_CHAR16:
+            return "char16_t";
+        case cv_builtin::T_CHAR32:
+            return "char32_t";
+        case cv_builtin::T_INT1:
+            return "int8_t";
+        case cv_builtin::T_UINT1:
+            return "uint8_t";
+        case cv_builtin::T_SHORT:
+            return "short";
+        case cv_builtin::T_USHORT:
+            return "unsigned short";
+        case cv_builtin::T_INT2:
+            return "int16_t";
+        case cv_builtin::T_UINT2:
+            return "uint16_t";
+        case cv_builtin::T_LONG:
+            return "long";
+        case cv_builtin::T_ULONG:
+            return "unsigned long";
+        case cv_builtin::T_INT4:
+            return "int";
+        case cv_builtin::T_UINT4:
+            return "unsigned int";
+        case cv_builtin::T_QUAD:
+            return "long long";
+        case cv_builtin::T_UQUAD:
+            return "unsigned long long";
+        case cv_builtin::T_INT8:
+            return "int64_t";
+        case cv_builtin::T_UINT8:
+            return "uint64_t";
+        case cv_builtin::T_REAL32:
+            return "float";
+        case cv_builtin::T_REAL64:
+            return "double";
+        case cv_builtin::T_BOOL08:
+            return "bool";
+    }
+
+    throw formatted_error("Unhandled builtin type {:x}\n", t);
+}
+
 static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
     if (t.size() < offsetof(lf_class, name))
         throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
@@ -238,6 +298,8 @@ static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, 
     // ignore forward declarations
     if (str.properties & CV_PROP_FORWARD_REF)
         return;
+
+    // FIXME - skip anonymous structs
 
     if (str.field_list < h.type_index_begin || str.field_list >= h.type_index_end)
         throw formatted_error("Struct field list {:x} was out of bounds.", str.field_list);
@@ -273,7 +335,10 @@ static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, 
         if (auto st = name.find('\0'); st != string::npos)
             name = name.substr(0, st);
 
-        fmt::print("    // FIXME - {}\n", name);
+        if (mem.type < h.type_index_begin)
+            fmt::print("    {} {};\n", builtin_type(mem.type), name);
+        else
+            fmt::print("    // FIXME - {}\n", name); // FIXME
     });
 
     fmt::print("}};\n\n");

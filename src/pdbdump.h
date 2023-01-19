@@ -74,6 +74,34 @@ enum class cv_type : uint16_t {
     LF_UQUADWORD = 0x800a
 };
 
+enum class cv_builtin : uint32_t {
+    T_VOID = 0x0003,
+    T_HRESULT = 0x0008,
+    T_CHAR = 0x0010,
+    T_UCHAR = 0x0020,
+    T_RCHAR = 0x0070,
+    T_WCHAR = 0x0071,
+    T_CHAR16 = 0x007a,
+    T_CHAR32 = 0x007b,
+    T_INT1 = 0x0068,
+    T_UINT1 = 0x0069,
+    T_SHORT = 0x0011,
+    T_USHORT = 0x0021,
+    T_INT2 = 0x0072,
+    T_UINT2 = 0x0073,
+    T_LONG = 0x0012,
+    T_ULONG = 0x0022,
+    T_INT4 = 0x0074,
+    T_UINT4 = 0x0075,
+    T_QUAD = 0x0013,
+    T_UQUAD = 0x0023,
+    T_INT8 = 0x0076,
+    T_UINT8 = 0x0077,
+    T_REAL32 = 0x0040,
+    T_REAL64 = 0x0041,
+    T_BOOL08 = 0x0030
+};
+
 template<>
 struct fmt::formatter<enum cv_type> {
     constexpr auto parse(format_parse_context& ctx) {
