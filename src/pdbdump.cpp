@@ -15,6 +15,7 @@ public:
     void print_member(span<const uint8_t> mt, string_view name);
     size_t get_type_size(uint32_t type);
     string type_name(span<const uint8_t> t);
+    string arg_list_to_string(uint32_t arg_list);
 
 private:
     bfd* types_stream;
@@ -415,10 +416,8 @@ string pdb::type_name(span<const uint8_t> t) {
             return string{name};
         }
 
-        // FIXME - LF_PROCEDURE
-
         default:
-            throw formatted_error("FIXME - {} type\n", kind);
+            throw formatted_error("Unhandled type {}\n", kind);
     }
 }
 
@@ -553,58 +552,157 @@ size_t pdb::get_type_size(uint32_t type) {
     }
 }
 
-void pdb::print_member(span<const uint8_t> mt, string_view name) {
-    if (mt.size() >= sizeof(cv_type) && *(cv_type*)mt.data() == cv_type::LF_ARRAY) {
-        const auto* arr = (lf_array*)mt.data();
+string pdb::arg_list_to_string(uint32_t arg_list) {
+    if (arg_list < h.type_index_begin || arg_list >= h.type_index_end)
+        throw formatted_error("Arg list type {:x} was out of bounds.", arg_list);
 
-        if (mt.size() < offsetof(lf_array, name))
-            throw formatted_error("Truncated LF_ARRAY ({} bytes, expected at least {})", mt.size(), offsetof(lf_array, name));
+    const auto& t = types[arg_list - h.type_index_begin];
 
-        string name2{name};
-        size_t num_els = array_length(*arr) / get_type_size(arr->element_type);
+    if (t.size() < sizeof(cv_type))
+        throw formatted_error("Arg list {:x} was truncated.", arg_list);
 
-        name2 += "[" + to_string(num_els) + "]";
+    if (*(cv_type*)t.data() != cv_type::LF_ARGLIST)
+        throw formatted_error("LF_PROCEDURE pointed to {}, expected LF_ARGLIST.", *(cv_type*)t.data());
 
-        do {
-            if (arr->element_type < h.type_index_begin) {
-                fmt::print("    {} {};\n", builtin_type(arr->element_type), name2);
-                return;
-            }
+    if (t.size() < offsetof(lf_arglist, args))
+        throw formatted_error("Arg list {:x} was truncated.", arg_list);
 
-            if (arr->element_type >= h.type_index_end)
-                throw formatted_error("Array element type {:x} was out of bounds.", arr->element_type);
+    const auto& al = *(lf_arglist*)t.data();
 
-            const auto& mt2 = types[arr->element_type - h.type_index_begin];
+    if (t.size() < offsetof(lf_arglist, args) + (sizeof(uint32_t) * al.num_entries))
+        throw formatted_error("Arg list {:x} was truncated.", arg_list);
 
-            if (mt2.size() < sizeof(cv_type) || *(cv_type*)mt2.data() != cv_type::LF_ARRAY) {
-                fmt::print("    {} {};\n", type_name(mt2), name2);
-                return;
-            }
+    string s;
 
-            arr = (lf_array*)mt2.data();
+    for (uint32_t i = 0; i < al.num_entries; i++) {
+        if (i != 0)
+            s += ", ";
 
-            num_els = array_length(*arr) / get_type_size(arr->element_type);
+        auto n = al.args[i];
 
-            name2 += "[" + to_string(num_els) + "]";
-        } while (true);
-    } else if (mt.size() >= sizeof(cv_type) && *(cv_type*)mt.data() == cv_type::LF_BITFIELD) {
-        const auto& bf = *(lf_bitfield*)mt.data();
-
-        if (mt.size() < sizeof(lf_bitfield))
-            throw formatted_error("Truncated LF_BITFIELD ({} bytes, expected {})", mt.size(), sizeof(lf_bitfield));
-
-        if (bf.base_type < h.type_index_begin) {
-            fmt::print("    {} {} : {};\n", builtin_type(bf.base_type), name, bf.length);
-            return;
+        if (n < h.type_index_begin) {
+            s += builtin_type(n);
+            continue;
         }
 
-        if (bf.base_type >= h.type_index_end)
-            throw formatted_error("Bitfield base type {:x} was out of bounds.", bf.base_type);
+        if (n >= h.type_index_end)
+            throw formatted_error("Argument type {:x} was out of bounds.", n);
 
-        const auto& mt2 = types[bf.base_type - h.type_index_begin];
+        const auto& t2 = types[n - h.type_index_begin];
 
-        fmt::print("    {} {} : {};\n", type_name(mt2), name, bf.length);
-        return;
+        s += type_name(t2);
+    }
+
+    return s;
+}
+
+void pdb::print_member(span<const uint8_t> mt, string_view name) {
+    if (mt.size() >= sizeof(cv_type)) {
+        switch (*(cv_type*)mt.data()) {
+            case cv_type::LF_ARRAY: {
+                const auto* arr = (lf_array*)mt.data();
+
+                if (mt.size() < offsetof(lf_array, name))
+                    throw formatted_error("Truncated LF_ARRAY ({} bytes, expected at least {})", mt.size(), offsetof(lf_array, name));
+
+                string name2{name};
+                size_t num_els = array_length(*arr) / get_type_size(arr->element_type);
+
+                name2 += "[" + to_string(num_els) + "]";
+
+                do {
+                    if (arr->element_type < h.type_index_begin) {
+                        fmt::print("    {} {};\n", builtin_type(arr->element_type), name2);
+                        return;
+                    }
+
+                    if (arr->element_type >= h.type_index_end)
+                        throw formatted_error("Array element type {:x} was out of bounds.", arr->element_type);
+
+                    const auto& mt2 = types[arr->element_type - h.type_index_begin];
+
+                    if (mt2.size() < sizeof(cv_type) || *(cv_type*)mt2.data() != cv_type::LF_ARRAY) {
+                        fmt::print("    {} {};\n", type_name(mt2), name2);
+                        return;
+                    }
+
+                    arr = (lf_array*)mt2.data();
+
+                    num_els = array_length(*arr) / get_type_size(arr->element_type);
+
+                    name2 += "[" + to_string(num_els) + "]";
+                } while (true);
+            }
+
+            case cv_type::LF_BITFIELD: {
+                const auto& bf = *(lf_bitfield*)mt.data();
+
+                if (mt.size() < sizeof(lf_bitfield))
+                    throw formatted_error("Truncated LF_BITFIELD ({} bytes, expected {})", mt.size(), sizeof(lf_bitfield));
+
+                if (bf.base_type < h.type_index_begin) {
+                    fmt::print("    {} {} : {};\n", builtin_type(bf.base_type), name, bf.length);
+                    return;
+                }
+
+                if (bf.base_type >= h.type_index_end)
+                    throw formatted_error("Bitfield base type {:x} was out of bounds.", bf.base_type);
+
+                const auto& mt2 = types[bf.base_type - h.type_index_begin];
+
+                fmt::print("    {} {} : {};\n", type_name(mt2), name, bf.length);
+                return;
+            }
+
+            case cv_type::LF_POINTER: {
+                // handle procedure pointers
+
+                // FIXME - double pointers, arrays of pointers, etc.
+
+                if (mt.size() < sizeof(lf_pointer))
+                    break;
+
+                const auto& ptr = *(lf_pointer*)mt.data();
+
+                if (ptr.base_type < h.type_index_begin)
+                    break;
+
+                if (ptr.base_type >= h.type_index_end)
+                    break;
+
+                const auto& mt2 = types[ptr.base_type - h.type_index_begin];
+
+                if (mt2.size() < sizeof(cv_type))
+                    break;
+
+                if (*(cv_type*)mt2.data() != cv_type::LF_PROCEDURE)
+                    break;
+
+                if (mt2.size() < sizeof(lf_procedure))
+                    throw formatted_error("Truncated LF_PROCEDURE ({} bytes, expected {})", mt2.size(), sizeof(lf_procedure));
+
+                const auto& proc = *(lf_procedure*)mt2.data();
+
+                string ret;
+
+                if (proc.return_type < h.type_index_begin)
+                    ret = builtin_type(proc.return_type);
+                else {
+                    if (proc.return_type >= h.type_index_end)
+                        throw formatted_error("Procedure return type {:x} was out of bounds.", proc.return_type);
+
+                    const auto& rt = types[proc.return_type - h.type_index_begin];
+
+                    ret = type_name(rt);
+                }
+
+                fmt::print("    {} (*{})({});\n", ret, name, arg_list_to_string(proc.arglist));
+                return;
+            }
+
+            default:
+                break;
+        }
     }
 
     fmt::print("    {} {};\n", type_name(mt), name);

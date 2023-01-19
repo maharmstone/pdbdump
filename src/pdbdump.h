@@ -312,3 +312,20 @@ struct lf_bitfield {
     uint8_t length;
     uint8_t position;
 } __attribute__((packed));
+
+// lfProc in cvinfo.h
+struct lf_procedure {
+    cv_type kind;
+    uint32_t return_type;
+    uint8_t calling_convention;
+    uint8_t attributes;
+    uint16_t num_parameters;
+    uint32_t arglist;
+} __attribute__((packed));
+
+// lfArgList in cvinfo.h
+struct lf_arglist {
+    cv_type kind;
+    uint32_t num_entries;
+    uint32_t args[];
+} __attribute__((packed));
