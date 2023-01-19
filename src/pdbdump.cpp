@@ -307,6 +307,22 @@ static string builtin_type(uint32_t t) {
     throw formatted_error("Unhandled builtin type {:x}\n", t);
 }
 
+static string_view struct_name(span<const uint8_t> t) {
+    const auto& str = *(lf_class*)t.data();
+
+    size_t off = offsetof(lf_class, name);
+
+    if (str.length >= 0x8000)
+        off += extended_value_len((cv_type)str.length);
+
+    auto name = string_view((char*)&str + off, t.size() - off);
+
+    if (auto st = name.find('\0'); st != string::npos)
+        name = name.substr(0, st);
+
+    return name;
+}
+
 string pdb::type_name(span<const uint8_t> t) {
     if (t.size() < sizeof(cv_type))
         throw formatted_error("Truncated type");
@@ -336,15 +352,9 @@ string pdb::type_name(span<const uint8_t> t) {
             if (t.size() < offsetof(lf_class, name))
                 throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
 
-            const auto& str = *(lf_class*)t.data();
-
             // FIXME - anonymous structs
-            // FIXME - long structs
 
-            auto name = string_view(str.name, t.size() - offsetof(lf_class, name));
-
-            if (auto st = name.find('\0'); st != string::npos)
-                name = name.substr(0, st);
+            auto name = struct_name(t);
 
             return string{name};
         }
@@ -501,11 +511,7 @@ size_t pdb::get_type_size(uint32_t type) {
 
             if (str.properties & CV_PROP_FORWARD_REF) {
                 // resolve forward ref
-
-                auto name = string_view(str.name, t.size() - offsetof(lf_class, name));
-
-                if (auto st = name.find('\0'); st != string::npos)
-                    name = name.substr(0, st);
+                auto name = struct_name(t);
 
                 // FIXME - use hash stream
 
@@ -521,12 +527,7 @@ size_t pdb::get_type_size(uint32_t type) {
                     if (str2.properties & CV_PROP_FORWARD_REF)
                         continue;
 
-                    // FIXME - long structs
-
-                    auto name2 = string_view(str2.name, t2.size() - offsetof(lf_class, name));
-
-                    if (auto st = name2.find('\0'); st != string::npos)
-                        name2 = name2.substr(0, st);
+                    auto name2 = struct_name(t2);
 
                     if (name == name2)
                         return str2.length;
@@ -606,10 +607,7 @@ void pdb::print_struct(span<const uint8_t> t) {
 
     const auto& fl = types[str.field_list - h.type_index_begin];
 
-    auto name = string_view(str.name, t.size() - offsetof(lf_class, name));
-
-    if (auto st = name.find('\0'); st != string::npos)
-        name = name.substr(0, st);
+    auto name = struct_name(t);
 
     // FIXME - "class" instead if LF_CLASS
     fmt::print("struct {} {{\n", name);
