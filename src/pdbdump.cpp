@@ -415,8 +415,6 @@ string pdb::type_name(span<const uint8_t> t) {
             return string{name};
         }
 
-        // FIXME - LF_ARRAY
-        // FIXME - LF_BITFIELD
         // FIXME - LF_PROCEDURE
 
         default:
@@ -580,6 +578,24 @@ void pdb::print_member(span<const uint8_t> mt, string_view name) {
 
             name2 += "[" + to_string(num_els) + "]";
         } while (true);
+    } else if (mt.size() >= sizeof(cv_type) && *(cv_type*)mt.data() == cv_type::LF_BITFIELD) {
+        const auto& bf = *(lf_bitfield*)mt.data();
+
+        if (mt.size() < sizeof(lf_bitfield))
+            throw formatted_error("Truncated LF_BITFIELD ({} bytes, expected {})", mt.size(), sizeof(lf_bitfield));
+
+        if (bf.base_type < h.type_index_begin) {
+            fmt::print("    {} {} : {};\n", builtin_type(bf.base_type), name, bf.length);
+            return;
+        }
+
+        if (bf.base_type >= h.type_index_end)
+            throw formatted_error("Bitfield base type {:x} was out of bounds.", bf.base_type);
+
+        const auto& mt2 = types[bf.base_type - h.type_index_begin];
+
+        fmt::print("    {} {} : {};\n", type_name(mt2), name, bf.length);
+        return;
     }
 
     fmt::print("    {} {};\n", type_name(mt), name);

@@ -304,3 +304,11 @@ struct lf_union {
     uint16_t length;
     char name[];
 } __attribute__((packed));
+
+// lfBitfield in cvinfo.h
+struct lf_bitfield {
+    cv_type kind;
+    uint32_t base_type;
+    uint8_t length;
+    uint8_t position;
+} __attribute__((packed));
