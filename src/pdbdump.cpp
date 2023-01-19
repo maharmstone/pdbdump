@@ -373,10 +373,23 @@ string pdb::type_name(span<const uint8_t> t) {
             return pref + type_name(bt);
         }
 
+        case cv_type::LF_ENUM: {
+            if (t.size() < offsetof(lf_enum, name))
+                throw formatted_error("Truncated LF_ENUM ({} bytes, expected at least {})", t.size(), offsetof(lf_enum, name));
+
+            const auto& en = *(lf_enum*)t.data();
+
+            auto name = string_view(en.name, t.size() - offsetof(lf_enum, name));
+
+            if (auto st = name.find('\0'); st != string::npos)
+                name = name.substr(0, st);
+
+            return string{name};
+        }
+
         // FIXME - LF_ARRAY
         // FIXME - LF_BITFIELD
         // FIXME - LF_UNION
-        // FIXME - LF_ENUM
         // FIXME - LF_PROCEDURE
 
         default:
