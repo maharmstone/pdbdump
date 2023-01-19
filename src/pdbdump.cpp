@@ -493,6 +493,15 @@ size_t pdb::get_type_size(uint32_t type) {
             return (ptr.attributes & 0x7e000) >> 13; // pointer size
         }
 
+        case cv_type::LF_MODIFIER: {
+            if (t.size() < sizeof(lf_modifier))
+                throw formatted_error("Modifier type {:x} was truncated.", type);
+
+            const auto& mod = *(lf_modifier*)t.data();
+
+            return get_type_size(mod.base_type);
+        }
+
         case cv_type::LF_ARRAY: {
             if (t.size() < offsetof(lf_array, name))
                 throw formatted_error("Array type {:x} was truncated.", type);
