@@ -342,6 +342,43 @@ static string type_name(span<const uint8_t> t, const pdb_tpi_stream_header& h, c
     }
 }
 
+static void print_member(span<const uint8_t> mt, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types,
+                         string_view name) {
+    if (mt.size() >= sizeof(cv_type) && *(cv_type*)mt.data() == cv_type::LF_ARRAY) {
+        const auto* arr = (lf_array*)mt.data();
+
+        if (mt.size() < offsetof(lf_array, name))
+            throw formatted_error("Truncated LF_ARRAY ({} bytes, expected at least {})", mt.size(), offsetof(lf_array, name));
+
+        string name2{name};
+
+        // FIXME - no. of elements
+        name2 += "[?" + to_string(arr->length_in_bytes) + "?]";
+
+        do {
+            if (arr->element_type < h.type_index_begin) {
+                fmt::print("    {} {};\n", builtin_type(arr->element_type), name2);
+                return;
+            }
+
+            if (arr->element_type >= h.type_index_end)
+                throw formatted_error("Array element type {:x} was out of bounds.", arr->element_type);
+
+            const auto& mt2 = types[arr->element_type - h.type_index_begin];
+
+            if (mt2.size() < sizeof(cv_type) || *(cv_type*)mt2.data() != cv_type::LF_ARRAY) {
+                fmt::print("    {} {};\n", type_name(mt2, h, types), name2);
+                return;
+            }
+
+            arr = (lf_array*)mt2.data();
+            name2 += "[?" + to_string(arr->length_in_bytes) + "?]";
+        } while (true);
+    }
+
+    fmt::print("    {} {};\n", type_name(mt, h, types), name);
+}
+
 static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
     if (t.size() < offsetof(lf_class, name))
         throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
@@ -401,7 +438,7 @@ static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, 
 
         const auto& mt = types[mem.type - h.type_index_begin];
 
-        fmt::print("    {} {};\n", type_name(mt, h, types), name);
+        print_member(mt, h, types, name);
     });
 
     fmt::print("}};\n\n");

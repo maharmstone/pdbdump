@@ -221,6 +221,8 @@ struct pdb_tpi_stream_header {
     uint32_t hash_adj_buffer_length;
 };
 
+static const uint32_t TPI_STREAM_VERSION_80 = 20040203;
+
 // lfEnum in cvinfo.h
 struct lf_enum {
     cv_type kind;
@@ -273,4 +275,11 @@ struct lf_pointer {
     uint32_t attributes;
 } __attribute__((packed));
 
-static const uint32_t TPI_STREAM_VERSION_80 = 20040203;
+// lfArray in cvinfo.h
+struct lf_array {
+    cv_type kind;
+    uint32_t element_type;
+    uint32_t index_type;
+    uint16_t length_in_bytes;
+    char name[];
+} __attribute__((packed));
