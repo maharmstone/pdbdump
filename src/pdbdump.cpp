@@ -348,11 +348,35 @@ string pdb::type_name(span<const uint8_t> t) {
             return string{name};
         }
 
+        case cv_type::LF_MODIFIER: {
+            if (t.size() < sizeof(lf_modifier))
+                throw formatted_error("Truncated LF_MODIFIER ({} bytes, expected {})", t.size(), sizeof(lf_modifier));
+
+            const auto& mod = *(lf_modifier*)t.data();
+
+            string pref;
+
+            if (mod.mod_const)
+                pref = "const ";
+
+            if (mod.mod_volatile)
+                pref += "volatile ";
+
+            if (mod.base_type < h.type_index_begin)
+                return pref + builtin_type(mod.base_type);
+
+            if (mod.base_type >= h.type_index_end)
+                throw formatted_error("Modifier base type {:x} was out of bounds.", mod.base_type);
+
+            const auto& bt = types[mod.base_type - h.type_index_begin];
+
+            return pref + type_name(bt);
+        }
+
         // FIXME - LF_ARRAY
         // FIXME - LF_BITFIELD
         // FIXME - LF_UNION
         // FIXME - LF_ENUM
-        // FIXME - LF_MODIFIER
         // FIXME - LF_PROCEDURE
 
         default:

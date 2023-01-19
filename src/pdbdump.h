@@ -283,3 +283,14 @@ struct lf_array {
     uint16_t length_in_bytes;
     char name[];
 } __attribute__((packed));
+
+// lfModifier in cvinfo.h
+struct lf_modifier {
+    cv_type kind;
+    uint32_t base_type;
+    uint16_t mod_const : 1;
+    uint16_t mod_volatile : 1;
+    uint16_t mod_unaligned : 1;
+    uint16_t mod_unused : 13;
+    uint16_t padding;
+} __attribute__((packed));
