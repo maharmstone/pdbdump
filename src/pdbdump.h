@@ -259,11 +259,18 @@ struct lf_class {
 
 // lfMember in cvinfo.h
 struct lf_member {
-  cv_type kind;
-  uint16_t attributes;
-  uint32_t type;
-  uint16_t offset;
-  char name[];
+    cv_type kind;
+    uint16_t attributes;
+    uint32_t type;
+    uint16_t offset;
+    char name[];
+} __attribute__((packed));
+
+// lfPointer in cvinfo.h
+struct lf_pointer {
+    cv_type kind;
+    uint32_t base_type;
+    uint32_t attributes;
 } __attribute__((packed));
 
 static const uint32_t TPI_STREAM_VERSION_80 = 20040203;

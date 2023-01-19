@@ -289,6 +289,59 @@ static string builtin_type(uint32_t t) {
     throw formatted_error("Unhandled builtin type {:x}\n", t);
 }
 
+static string type_name(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
+    if (t.size() < sizeof(cv_type))
+        throw formatted_error("Truncated type");
+
+    auto kind = *(cv_type*)t.data();
+
+    switch (kind) {
+        case cv_type::LF_POINTER: {
+            if (t.size() < sizeof(lf_pointer))
+                throw formatted_error("Truncated LF_POINTER ({} bytes, expected {})", t.size(), sizeof(lf_pointer));
+
+            const auto& p = *(lf_pointer*)t.data();
+
+            if (p.base_type < h.type_index_begin)
+                return builtin_type(p.base_type) + "*";
+
+            if (p.base_type >= h.type_index_end)
+                throw formatted_error("Pointer base type {:x} was out of bounds.", p.base_type);
+
+            const auto& bt = types[p.base_type - h.type_index_begin];
+
+            return type_name(bt, h, types) + "*";
+        }
+
+        case cv_type::LF_STRUCTURE:
+        case cv_type::LF_CLASS: {
+            if (t.size() < offsetof(lf_class, name))
+                throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
+
+            const auto& str = *(lf_class*)t.data();
+
+            // FIXME - anonymous structs
+
+            auto name = string_view(str.name, t.size() - offsetof(lf_class, name));
+
+            if (auto st = name.find('\0'); st != string::npos)
+                name = name.substr(0, st);
+
+            return string{name};
+        }
+
+        // FIXME - LF_ARRAY
+        // FIXME - LF_BITFIELD
+        // FIXME - LF_UNION
+        // FIXME - LF_ENUM
+        // FIXME - LF_MODIFIER
+        // FIXME - LF_PROCEDURE
+
+        default:
+            throw formatted_error("FIXME - {} type\n", kind);
+    }
+}
+
 static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, const vector<span<const uint8_t>>& types) {
     if (t.size() < offsetof(lf_class, name))
         throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
@@ -319,6 +372,9 @@ static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, 
     // FIXME - "class" instead if LF_CLASS
     fmt::print("struct {} {{\n", name);
 
+    // FIXME - anonymous structs
+    // FIXME - unions
+
     walk_fieldlist(fl, [&](span<const uint8_t> d) {
         const auto& mem = *(lf_member*)d.data();
 
@@ -335,10 +391,17 @@ static void print_struct(span<const uint8_t> t, const pdb_tpi_stream_header& h, 
         if (auto st = name.find('\0'); st != string::npos)
             name = name.substr(0, st);
 
-        if (mem.type < h.type_index_begin)
+        if (mem.type < h.type_index_begin) {
             fmt::print("    {} {};\n", builtin_type(mem.type), name);
-        else
-            fmt::print("    // FIXME - {}\n", name); // FIXME
+            return;
+        }
+
+        if (mem.type >= h.type_index_end)
+            throw formatted_error("Member type {:x} was out of bounds.", mem.type);
+
+        const auto& mt = types[mem.type - h.type_index_begin];
+
+        fmt::print("    {} {};\n", type_name(mt, h, types), name);
     });
 
     fmt::print("}};\n\n");
