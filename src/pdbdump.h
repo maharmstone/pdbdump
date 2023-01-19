@@ -294,3 +294,13 @@ struct lf_modifier {
     uint16_t mod_unused : 13;
     uint16_t padding;
 } __attribute__((packed));
+
+// lfUnion in cvinfo.h
+struct lf_union {
+    cv_type kind;
+    uint16_t num_members;
+    uint16_t properties;
+    uint32_t field_list;
+    uint16_t length;
+    char name[];
+} __attribute__((packed));

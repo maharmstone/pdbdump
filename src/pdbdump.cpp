@@ -339,6 +339,7 @@ string pdb::type_name(span<const uint8_t> t) {
             const auto& str = *(lf_class*)t.data();
 
             // FIXME - anonymous structs
+            // FIXME - long structs
 
             auto name = string_view(str.name, t.size() - offsetof(lf_class, name));
 
@@ -387,9 +388,25 @@ string pdb::type_name(span<const uint8_t> t) {
             return string{name};
         }
 
+        case cv_type::LF_UNION: {
+            if (t.size() < offsetof(lf_union, name))
+                throw formatted_error("Truncated LF_UNION ({} bytes, expected at least {})", t.size(), offsetof(lf_union, name));
+
+            const auto& un = *(lf_union*)t.data();
+
+            // FIXME - anonymous unions
+            // FIXME - long unions
+
+            auto name = string_view(un.name, t.size() - offsetof(lf_union, name));
+
+            if (auto st = name.find('\0'); st != string::npos)
+                name = name.substr(0, st);
+
+            return string{name};
+        }
+
         // FIXME - LF_ARRAY
         // FIXME - LF_BITFIELD
-        // FIXME - LF_UNION
         // FIXME - LF_PROCEDURE
 
         default:
@@ -683,6 +700,8 @@ void pdb::extract_types() {
                 case cv_type::LF_ENUM:
                     print_enum(t);
                     break;
+
+                // FIXME - LF_UNIONs
 
                 case cv_type::LF_STRUCTURE:
                 case cv_type::LF_CLASS:
