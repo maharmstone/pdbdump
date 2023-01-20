@@ -13,7 +13,7 @@ public:
     void print_struct(span<const uint8_t> t);
     void print_enum(span<const uint8_t> t);
     string format_member(span<const uint8_t> mt, string_view name);
-    size_t get_type_size(uint32_t type);
+    uint64_t get_type_size(uint32_t type);
     string type_name(span<const uint8_t> t);
     string arg_list_to_string(uint32_t arg_list);
 
@@ -324,6 +324,22 @@ static string_view struct_name(span<const uint8_t> t) {
     return name;
 }
 
+static string_view union_name(span<const uint8_t> t) {
+    const auto& str = *(lf_union*)t.data();
+
+    size_t off = offsetof(lf_union, name);
+
+    if (str.length >= 0x8000)
+        off += extended_value_len((cv_type)str.length);
+
+    auto name = string_view((char*)&str + off, t.size() - off);
+
+    if (auto st = name.find('\0'); st != string::npos)
+        name = name.substr(0, st);
+
+    return name;
+}
+
 string pdb::type_name(span<const uint8_t> t) {
     if (t.size() < sizeof(cv_type))
         throw formatted_error("Truncated type");
@@ -427,7 +443,7 @@ static size_t array_length(const lf_array& arr) {
     return arr.length_in_bytes;
 }
 
-size_t pdb::get_type_size(uint32_t type) {
+uint64_t pdb::get_type_size(uint32_t type) {
     if (type < h.type_index_begin) {
         if (type >> 8 == 4)
             return 4; // 32-bit pointer
@@ -554,6 +570,78 @@ size_t pdb::get_type_size(uint32_t type) {
             const auto& en = *(lf_enum*)t.data();
 
             return get_type_size(en.underlying_type);
+        }
+
+        case cv_type::LF_UNION: {
+            if (t.size() < offsetof(lf_union, name))
+                throw formatted_error("Union type {:x} was truncated.", type);
+
+            const auto* un = (lf_union*)t.data();
+
+            if (un->properties & CV_PROP_FORWARD_REF) {
+                // resolve forward ref
+
+                bool found = false;
+                auto name = union_name(t);
+
+                // FIXME - use hash stream
+
+                for (const auto& t2 : types) {
+                    if (t2.size() < sizeof(cv_type) || *(cv_type*)t2.data() != *(cv_type*)t.data())
+                        continue;
+
+                    if (t2.size() < offsetof(lf_union, name))
+                        continue;
+
+                    const auto& un2 = *(lf_union*)t2.data();
+
+                    if (un2.properties & CV_PROP_FORWARD_REF)
+                        continue;
+
+                    auto name2 = union_name(t2);
+
+                    if (name == name2) {
+                        found = true;
+                        un = &un2;
+                        break;
+                    }
+                }
+
+                if (!found)
+                    throw formatted_error("Could not resolve forward ref for union {}.", name);
+            }
+
+            if (un->length < 0x8000)
+                return un->length;
+
+            if (t.size() < offsetof(lf_union, name) + extended_value_len((cv_type)un->length))
+                throw formatted_error("Union type {:x} was truncated.", type);
+
+            switch ((cv_type)un->length) {
+                case cv_type::LF_CHAR:
+                    return *(int8_t*)&un->name;
+
+                case cv_type::LF_SHORT:
+                    return *(int16_t*)&un->name;
+
+                case cv_type::LF_USHORT:
+                    return *(uint16_t*)&un->name;
+
+                case cv_type::LF_LONG:
+                    return *(int32_t*)&un->name;
+
+                case cv_type::LF_ULONG:
+                    return *(uint32_t*)&un->name;
+
+                case cv_type::LF_QUADWORD:
+                    return *(int64_t*)&un->name;
+
+                case cv_type::LF_UQUADWORD:
+                    return *(uint64_t*)&un->name;
+
+                default:
+                    throw formatted_error("Could not parse union length type {}\n", (cv_type)un->length);
+            }
         }
 
         default:
