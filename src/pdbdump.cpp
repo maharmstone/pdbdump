@@ -547,6 +547,15 @@ size_t pdb::get_type_size(uint32_t type) {
             return str.length;
         }
 
+        case cv_type::LF_ENUM: {
+            if (t.size() < offsetof(lf_enum, name))
+                throw formatted_error("Enum type {:x} was truncated.", type);
+
+            const auto& en = *(lf_enum*)t.data();
+
+            return get_type_size(en.underlying_type);
+        }
+
         default:
             throw formatted_error("Could not find size of {} type {:x}\n", *(cv_type*)t.data(), type);
     }
