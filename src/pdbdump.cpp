@@ -650,8 +650,6 @@ string pdb::format_member(span<const uint8_t> mt, string_view name) {
             case cv_type::LF_POINTER: {
                 // handle procedure pointers
 
-                // FIXME - double pointers?
-
                 if (mt.size() < sizeof(lf_pointer))
                     break;
 
@@ -663,33 +661,52 @@ string pdb::format_member(span<const uint8_t> mt, string_view name) {
                 if (ptr.base_type >= h.type_index_end)
                     break;
 
-                const auto& mt2 = types[ptr.base_type - h.type_index_begin];
+                const auto* mt2 = &types[ptr.base_type - h.type_index_begin];
+                unsigned int depth = 1;
 
-                if (mt2.size() < sizeof(cv_type))
-                    break;
+                do {
+                    if (mt2->size() < sizeof(cv_type))
+                        break;
 
-                if (*(cv_type*)mt2.data() != cv_type::LF_PROCEDURE)
-                    break;
+                    if (*(cv_type*)mt2->data() == cv_type::LF_PROCEDURE) {
+                        if (mt2->size() < sizeof(lf_procedure))
+                            throw formatted_error("Truncated LF_PROCEDURE ({} bytes, expected {})", mt2->size(), sizeof(lf_procedure));
 
-                if (mt2.size() < sizeof(lf_procedure))
-                    throw formatted_error("Truncated LF_PROCEDURE ({} bytes, expected {})", mt2.size(), sizeof(lf_procedure));
+                        const auto& proc = *(lf_procedure*)mt2->data();
 
-                const auto& proc = *(lf_procedure*)mt2.data();
+                        string ret;
 
-                string ret;
+                        if (proc.return_type < h.type_index_begin)
+                            ret = builtin_type(proc.return_type);
+                        else {
+                            if (proc.return_type >= h.type_index_end)
+                                throw formatted_error("Procedure return type {:x} was out of bounds.", proc.return_type);
 
-                if (proc.return_type < h.type_index_begin)
-                    ret = builtin_type(proc.return_type);
-                else {
-                    if (proc.return_type >= h.type_index_end)
-                        throw formatted_error("Procedure return type {:x} was out of bounds.", proc.return_type);
+                            const auto& rt = types[proc.return_type - h.type_index_begin];
 
-                    const auto& rt = types[proc.return_type - h.type_index_begin];
+                            ret = format_member(rt, "");
+                        }
 
-                    ret = format_member(rt, "");
-                }
+                        return fmt::format("{} ({:*>{}}{})({})", ret, "", depth, name, arg_list_to_string(proc.arglist));
+                    } else if (*(cv_type*)mt2->data() == cv_type::LF_POINTER) {
+                        depth++;
 
-                return fmt::format("{} (*{})({})", ret, name, arg_list_to_string(proc.arglist));
+                        if (mt2->size() < sizeof(lf_pointer))
+                            break;
+
+                        const auto& ptr = *(lf_pointer*)mt2->data();
+
+                        if (ptr.base_type < h.type_index_begin)
+                            break;
+
+                        if (ptr.base_type >= h.type_index_end)
+                            break;
+
+                        mt2 = &types[ptr.base_type - h.type_index_begin];
+                    } else
+                        break;
+                } while (true);
+
             }
 
             default:
