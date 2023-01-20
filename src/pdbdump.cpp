@@ -12,7 +12,7 @@ public:
     void extract_types();
     void print_struct(span<const uint8_t> t);
     void print_enum(span<const uint8_t> t);
-    void print_member(span<const uint8_t> mt, string_view name);
+    string format_member(span<const uint8_t> mt, string_view name);
     size_t get_type_size(uint32_t type);
     string type_name(span<const uint8_t> t);
     string arg_list_to_string(uint32_t arg_list);
@@ -596,7 +596,7 @@ string pdb::arg_list_to_string(uint32_t arg_list) {
     return s;
 }
 
-void pdb::print_member(span<const uint8_t> mt, string_view name) {
+string pdb::format_member(span<const uint8_t> mt, string_view name) {
     if (mt.size() >= sizeof(cv_type)) {
         switch (*(cv_type*)mt.data()) {
             case cv_type::LF_ARRAY: {
@@ -611,20 +611,16 @@ void pdb::print_member(span<const uint8_t> mt, string_view name) {
                 name2 += "[" + to_string(num_els) + "]";
 
                 do {
-                    if (arr->element_type < h.type_index_begin) {
-                        fmt::print("    {} {};\n", builtin_type(arr->element_type), name2);
-                        return;
-                    }
+                    if (arr->element_type < h.type_index_begin)
+                        return fmt::format("{} {}", builtin_type(arr->element_type), name2);
 
                     if (arr->element_type >= h.type_index_end)
                         throw formatted_error("Array element type {:x} was out of bounds.", arr->element_type);
 
                     const auto& mt2 = types[arr->element_type - h.type_index_begin];
 
-                    if (mt2.size() < sizeof(cv_type) || *(cv_type*)mt2.data() != cv_type::LF_ARRAY) {
-                        print_member(mt2, name2);
-                        return;
-                    }
+                    if (mt2.size() < sizeof(cv_type) || *(cv_type*)mt2.data() != cv_type::LF_ARRAY)
+                        return format_member(mt2, name2);
 
                     arr = (lf_array*)mt2.data();
 
@@ -640,18 +636,15 @@ void pdb::print_member(span<const uint8_t> mt, string_view name) {
                 if (mt.size() < sizeof(lf_bitfield))
                     throw formatted_error("Truncated LF_BITFIELD ({} bytes, expected {})", mt.size(), sizeof(lf_bitfield));
 
-                if (bf.base_type < h.type_index_begin) {
-                    fmt::print("    {} {} : {};\n", builtin_type(bf.base_type), name, bf.length);
-                    return;
-                }
+                if (bf.base_type < h.type_index_begin)
+                    return fmt::format("{} {} : {}", builtin_type(bf.base_type), name, bf.length);
 
                 if (bf.base_type >= h.type_index_end)
                     throw formatted_error("Bitfield base type {:x} was out of bounds.", bf.base_type);
 
                 const auto& mt2 = types[bf.base_type - h.type_index_begin];
 
-                fmt::print("    {} {} : {};\n", type_name(mt2), name, bf.length);
-                return;
+                return fmt::format("{} {} : {}", type_name(mt2), name, bf.length);
             }
 
             case cv_type::LF_POINTER: {
@@ -696,8 +689,7 @@ void pdb::print_member(span<const uint8_t> mt, string_view name) {
                     ret = type_name(rt);
                 }
 
-                fmt::print("    {} (*{})({});\n", ret, name, arg_list_to_string(proc.arglist));
-                return;
+                return fmt::format("{} (*{})({})", ret, name, arg_list_to_string(proc.arglist));
             }
 
             default:
@@ -705,7 +697,7 @@ void pdb::print_member(span<const uint8_t> mt, string_view name) {
         }
     }
 
-    fmt::print("    {} {};\n", type_name(mt), name);
+    return fmt::format("{} {}", type_name(mt), name);
 }
 
 void pdb::print_struct(span<const uint8_t> t) {
@@ -764,7 +756,7 @@ void pdb::print_struct(span<const uint8_t> t) {
 
         const auto& mt = types[mem.type - h.type_index_begin];
 
-        print_member(mt, name);
+        fmt::print("    {};\n", format_member(mt, name));
     });
 
     fmt::print("}};\n\n");
