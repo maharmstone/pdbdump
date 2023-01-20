@@ -622,7 +622,7 @@ void pdb::print_member(span<const uint8_t> mt, string_view name) {
                     const auto& mt2 = types[arr->element_type - h.type_index_begin];
 
                     if (mt2.size() < sizeof(cv_type) || *(cv_type*)mt2.data() != cv_type::LF_ARRAY) {
-                        fmt::print("    {} {};\n", type_name(mt2), name2);
+                        print_member(mt2, name2);
                         return;
                     }
 
@@ -657,7 +657,7 @@ void pdb::print_member(span<const uint8_t> mt, string_view name) {
             case cv_type::LF_POINTER: {
                 // handle procedure pointers
 
-                // FIXME - double pointers, arrays of pointers, etc.
+                // FIXME - double pointers?
 
                 if (mt.size() < sizeof(lf_pointer))
                     break;
