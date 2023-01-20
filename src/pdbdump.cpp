@@ -590,7 +590,7 @@ string pdb::arg_list_to_string(uint32_t arg_list) {
 
         const auto& t2 = types[n - h.type_index_begin];
 
-        s += type_name(t2);
+        s += format_member(t2, "");
     }
 
     return s;
@@ -686,7 +686,7 @@ string pdb::format_member(span<const uint8_t> mt, string_view name) {
 
                     const auto& rt = types[proc.return_type - h.type_index_begin];
 
-                    ret = type_name(rt);
+                    ret = format_member(rt, "");
                 }
 
                 return fmt::format("{} (*{})({})", ret, name, arg_list_to_string(proc.arglist));
@@ -697,7 +697,10 @@ string pdb::format_member(span<const uint8_t> mt, string_view name) {
         }
     }
 
-    return fmt::format("{} {}", type_name(mt), name);
+    if (name.empty())
+        return type_name(mt);
+    else
+        return fmt::format("{} {}", type_name(mt), name);
 }
 
 void pdb::print_struct(span<const uint8_t> t) {
