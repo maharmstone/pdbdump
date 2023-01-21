@@ -11,6 +11,7 @@ public:
 
     void extract_types();
     void print_struct(span<const uint8_t> t);
+    void print_union(span<const uint8_t> t);
     void print_enum(span<const uint8_t> t);
     string format_member(span<const uint8_t> mt, string_view name);
     uint64_t get_type_size(uint32_t type);
@@ -879,6 +880,63 @@ void pdb::print_struct(span<const uint8_t> t) {
     fmt::print("}};\n\n");
 }
 
+void pdb::print_union(span<const uint8_t> t) {
+    if (t.size() < offsetof(lf_union, name))
+        throw formatted_error("Truncated LF_UNION ({} bytes, expected at least {})", t.size(), offsetof(lf_union, name));
+
+    const auto& un = *(lf_union*)t.data();
+
+    // ignore forward declarations
+    if (un.properties & CV_PROP_FORWARD_REF)
+        return;
+
+    // FIXME - skip anonymous unions
+
+    if (un.field_list < h.type_index_begin || un.field_list >= h.type_index_end)
+        throw formatted_error("Union field list {:x} was out of bounds.", un.field_list);
+
+    // FIXME - static_asserts (sizeof, offsetof)
+
+    const auto& fl = types[un.field_list - h.type_index_begin];
+
+    auto name = union_name(t);
+
+    fmt::print("union {} {{\n", name);
+
+    // FIXME - anonymous structs and unions
+
+    walk_fieldlist(fl, [&](span<const uint8_t> d) {
+        const auto& mem = *(lf_member*)d.data();
+
+        if (mem.kind != cv_type::LF_MEMBER)
+            return;
+
+        size_t off = offsetof(lf_member, name);
+
+        if (mem.offset >= 0x8000)
+            off += extended_value_len((cv_type)mem.offset);
+
+        auto name = string_view((char*)&mem + off, d.size() - off);
+
+        if (auto st = name.find('\0'); st != string::npos)
+            name = name.substr(0, st);
+
+        if (mem.type < h.type_index_begin) {
+            fmt::print("    {} {};\n", builtin_type(mem.type), name);
+            return;
+        }
+
+        if (mem.type >= h.type_index_end)
+            throw formatted_error("Member type {:x} was out of bounds.", mem.type);
+
+        const auto& mt = types[mem.type - h.type_index_begin];
+
+        fmt::print("    {};\n", format_member(mt, name));
+    });
+
+    fmt::print("}};\n\n");
+}
+
 void pdb::extract_types() {
     if (bfd_seek(types_stream, 0, SEEK_SET))
         throw runtime_error("bfd_seek failed");
@@ -931,7 +989,9 @@ void pdb::extract_types() {
                     print_enum(t);
                     break;
 
-                // FIXME - LF_UNIONs
+                case cv_type::LF_UNION:
+                    print_union(t);
+                    break;
 
                 case cv_type::LF_STRUCTURE:
                 case cv_type::LF_CLASS:
