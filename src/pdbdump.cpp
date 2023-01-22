@@ -325,6 +325,42 @@ static string_view struct_name(span<const uint8_t> t) {
     return name;
 }
 
+static uint64_t struct_length(span<const uint8_t> t) {
+    const auto& str = *(lf_class*)t.data();
+
+    if (str.length < 0x8000)
+        return str.length;
+
+    if (t.size() < offsetof(lf_class, name) + extended_value_len((cv_type)str.length))
+        throw formatted_error("Struct type was truncated.");
+
+    switch ((cv_type)str.length) {
+        case cv_type::LF_CHAR:
+            return *(int8_t*)&str.name;
+
+        case cv_type::LF_SHORT:
+            return *(int16_t*)&str.name;
+
+        case cv_type::LF_USHORT:
+            return *(uint16_t*)&str.name;
+
+        case cv_type::LF_LONG:
+            return *(int32_t*)&str.name;
+
+        case cv_type::LF_ULONG:
+            return *(uint32_t*)&str.name;
+
+        case cv_type::LF_QUADWORD:
+            return *(int64_t*)&str.name;
+
+        case cv_type::LF_UQUADWORD:
+            return *(uint64_t*)&str.name;
+
+        default:
+            throw formatted_error("Could not parse struct length type {}\n", (cv_type)str.length);
+    }
+}
+
 static string_view union_name(span<const uint8_t> t) {
     const auto& str = *(lf_union*)t.data();
 
@@ -990,6 +1026,16 @@ string pdb::format_member(span<const uint8_t> mt, string_view name, string_view 
 }
 
 void pdb::print_struct(span<const uint8_t> t) {
+    struct memb {
+        memb(string_view str, string_view name, uint64_t off, bool bitfield) :
+            str(str), name(name), off(off), bitfield(bitfield) { }
+
+        string str;
+        string name;
+        uint64_t off;
+        bool bitfield;
+    };
+
     if (t.size() < offsetof(lf_class, name))
         throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
 
@@ -1008,13 +1054,11 @@ void pdb::print_struct(span<const uint8_t> t) {
     // FIXME - derived_from
     // FIXME - vshape
 
-    // FIXME - static_asserts (sizeof, offsetof)
-
     const auto& fl = types[str.field_list - h.type_index_begin];
 
     auto name = struct_name(t);
 
-    vector<pair<string, uint64_t>> members;
+    vector<memb> members;
 
     // FIXME - "class" instead if LF_CLASS
     fmt::print("struct {} {{\n", name);
@@ -1029,7 +1073,7 @@ void pdb::print_struct(span<const uint8_t> t) {
         auto off = member_offset(d) * 8;
 
         if (mem.type < h.type_index_begin) {
-            members.emplace_back(fmt::format("    {} {};", builtin_type(mem.type), name), off);
+            members.emplace_back(fmt::format("    {} {};", builtin_type(mem.type), name), name, off, false);
             return;
         }
 
@@ -1037,24 +1081,26 @@ void pdb::print_struct(span<const uint8_t> t) {
             throw formatted_error("Member type {:x} was out of bounds.", mem.type);
 
         const auto& mt = types[mem.type - h.type_index_begin];
+        bool bitfield = false;
 
         if (mt.size() >= sizeof(lf_bitfield) && *(cv_type*)mt.data() == cv_type::LF_BITFIELD) {
             const auto& bf = *(lf_bitfield*)mt.data();
 
             off += bf.position;
+            bitfield = true;
         }
 
-        members.emplace_back(fmt::format("    {};", format_member(mt, name, "    ")), off);
+        members.emplace_back(fmt::format("    {};", format_member(mt, name, "    ")), name, off, bitfield);
     });
 
     for (auto it = members.begin(); it != members.end(); it++) {
-        if (next(it) != members.end() && next(it)->second == it->second) {
+        if (next(it) != members.end() && next(it)->off == it->off) {
             fmt::print("    union {{\n");
 
             while (true) {
-                fmt::print("    {}\n", it->first);
+                fmt::print("    {}\n", it->str);
 
-                if (next(it) != members.end() && next(it)->second == it->second)
+                if (next(it) != members.end() && next(it)->off == it->off)
                     it++;
                 else
                     break;
@@ -1062,10 +1108,23 @@ void pdb::print_struct(span<const uint8_t> t) {
 
             fmt::print("    }};\n");
         } else
-            fmt::print("{}\n", it->first);
+            fmt::print("{}\n", it->str);
     }
 
     fmt::print("}};\n\n");
+
+    fmt::print("static_assert(sizeof({}) == 0x{:x});\n", name, struct_length(t));
+
+    for (const auto& m : members) {
+        if (m.bitfield)
+            continue;
+
+        // FIXME - members of anonymous structs
+
+        fmt::print("static_assert(offsetof({}, {}) == 0x{:x});\n", name, m.name, m.off / 8);
+    }
+
+    fmt::print("\n");
 }
 
 void pdb::print_union(span<const uint8_t> t) {
