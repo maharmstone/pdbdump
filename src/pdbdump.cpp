@@ -1026,7 +1026,7 @@ void pdb::print_struct(span<const uint8_t> t) {
             return;
 
         auto name = member_name(d);
-        auto off = member_offset(d);
+        auto off = member_offset(d) * 8;
 
         if (mem.type < h.type_index_begin) {
             members.emplace_back(fmt::format("    {} {};", builtin_type(mem.type), name), off);
@@ -1037,6 +1037,12 @@ void pdb::print_struct(span<const uint8_t> t) {
             throw formatted_error("Member type {:x} was out of bounds.", mem.type);
 
         const auto& mt = types[mem.type - h.type_index_begin];
+
+        if (mt.size() >= sizeof(lf_bitfield) && *(cv_type*)mt.data() == cv_type::LF_BITFIELD) {
+            const auto& bf = *(lf_bitfield*)mt.data();
+
+            off += bf.position;
+        }
 
         members.emplace_back(fmt::format("    {};", format_member(mt, name, "    ")), off);
     });
@@ -1095,7 +1101,7 @@ void pdb::print_union(span<const uint8_t> t) {
             return;
 
         auto name = member_name(d);
-        auto off = member_offset(d);
+        auto off = member_offset(d) * 8;
 
         if (mem.type < h.type_index_begin) {
             members.emplace_back(fmt::format("    {} {};", builtin_type(mem.type), name), off);
@@ -1106,6 +1112,12 @@ void pdb::print_union(span<const uint8_t> t) {
             throw formatted_error("Member type {:x} was out of bounds.", mem.type);
 
         const auto& mt = types[mem.type - h.type_index_begin];
+
+        if (mt.size() >= sizeof(lf_bitfield) && *(cv_type*)mt.data() == cv_type::LF_BITFIELD) {
+            const auto& bf = *(lf_bitfield*)mt.data();
+
+            off += bf.position;
+        }
 
         members.emplace_back(fmt::format("    {};", format_member(mt, name, "    ")), off);
     });
