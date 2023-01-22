@@ -957,7 +957,8 @@ void pdb::print_struct(span<const uint8_t> t) {
     if (str.properties & CV_PROP_FORWARD_REF)
         return;
 
-    // FIXME - skip anonymous structs
+    if (is_name_anonymous(struct_name(t)))
+        return;
 
     if (str.field_list < h.type_index_begin || str.field_list >= h.type_index_end)
         throw formatted_error("Struct field list {:x} was out of bounds.", str.field_list);
