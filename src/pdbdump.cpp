@@ -1017,7 +1017,8 @@ void pdb::print_union(span<const uint8_t> t) {
     if (un.properties & CV_PROP_FORWARD_REF)
         return;
 
-    // FIXME - skip anonymous unions
+    if (is_name_anonymous(union_name(t)))
+        return;
 
     if (un.field_list < h.type_index_begin || un.field_list >= h.type_index_end)
         throw formatted_error("Union field list {:x} was out of bounds.", un.field_list);
