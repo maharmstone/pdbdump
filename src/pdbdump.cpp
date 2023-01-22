@@ -370,8 +370,6 @@ string pdb::type_name(span<const uint8_t> t) {
             if (t.size() < offsetof(lf_class, name))
                 throw formatted_error("Truncated LF_STRUCTURE / LF_CLASS ({} bytes, expected at least {})", t.size(), offsetof(lf_class, name));
 
-            // FIXME - anonymous structs
-
             auto name = struct_name(t);
 
             return string{name};
@@ -420,15 +418,7 @@ string pdb::type_name(span<const uint8_t> t) {
             if (t.size() < offsetof(lf_union, name))
                 throw formatted_error("Truncated LF_UNION ({} bytes, expected at least {})", t.size(), offsetof(lf_union, name));
 
-            const auto& un = *(lf_union*)t.data();
-
-            // FIXME - anonymous unions
-            // FIXME - long unions
-
-            auto name = string_view(un.name, t.size() - offsetof(lf_union, name));
-
-            if (auto st = name.find('\0'); st != string::npos)
-                name = name.substr(0, st);
+            auto name = union_name(t);
 
             return string{name};
         }
