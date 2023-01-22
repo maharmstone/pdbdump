@@ -881,6 +881,61 @@ string pdb::format_member(span<const uint8_t> mt, string_view name, string_view 
                 return s;
             }
 
+            case cv_type::LF_STRUCTURE:
+            case cv_type::LF_CLASS: {
+                if (mt.size() < offsetof(lf_class, name))
+                    break;
+
+                const auto& str = *(lf_class*)mt.data();
+
+                if (!is_name_anonymous(struct_name(mt)))
+                    break;
+
+                if (str.field_list < h.type_index_begin || str.field_list >= h.type_index_end)
+                    break;
+
+                const auto& fl = types[str.field_list - h.type_index_begin];
+
+                auto s = fmt::format("struct {{\n");
+
+                string prefix2{prefix};
+
+                prefix2 += "    ";
+
+                walk_fieldlist(fl, [&](span<const uint8_t> d) {
+                    const auto& mem = *(lf_member*)d.data();
+
+                    if (mem.kind != cv_type::LF_MEMBER)
+                        return;
+
+                    size_t off = offsetof(lf_member, name);
+
+                    if (mem.offset >= 0x8000)
+                        off += extended_value_len((cv_type)mem.offset);
+
+                    auto name = string_view((char*)&mem + off, d.size() - off);
+
+                    if (auto st = name.find('\0'); st != string::npos)
+                        name = name.substr(0, st);
+
+                    if (mem.type < h.type_index_begin) {
+                        s += fmt::format("{}{} {};\n", prefix2, builtin_type(mem.type), name);
+                        return;
+                    }
+
+                    if (mem.type >= h.type_index_end)
+                        throw formatted_error("Member type {:x} was out of bounds.", mem.type);
+
+                    const auto& mt = types[mem.type - h.type_index_begin];
+
+                    s += fmt::format("{}{};\n", prefix2, format_member(mt, name, prefix2));
+                });
+
+                s += fmt::format("{}}} {}", prefix, name);
+
+                return s;
+            }
+
             default:
                 break;
         }
@@ -918,8 +973,6 @@ void pdb::print_struct(span<const uint8_t> t) {
 
     // FIXME - "class" instead if LF_CLASS
     fmt::print("struct {} {{\n", name);
-
-    // FIXME - anonymous structs
 
     walk_fieldlist(fl, [&](span<const uint8_t> d) {
         const auto& mem = *(lf_member*)d.data();
@@ -975,8 +1028,6 @@ void pdb::print_union(span<const uint8_t> t) {
     auto name = union_name(t);
 
     fmt::print("union {} {{\n", name);
-
-    // FIXME - anonymous structs
 
     walk_fieldlist(fl, [&](span<const uint8_t> d) {
         const auto& mem = *(lf_member*)d.data();
@@ -1055,6 +1106,8 @@ void pdb::extract_types() {
             continue;
 
         auto kind = *(cv_type*)t.data();
+
+        // FIXME - implicit structs and unions
 
         try {
             switch (kind) {
