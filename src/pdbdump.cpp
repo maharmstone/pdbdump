@@ -1014,6 +1014,8 @@ void pdb::print_struct(span<const uint8_t> t) {
 
     auto name = struct_name(t);
 
+    vector<pair<string, uint64_t>> members;
+
     // FIXME - "class" instead if LF_CLASS
     fmt::print("struct {} {{\n", name);
 
@@ -1024,9 +1026,10 @@ void pdb::print_struct(span<const uint8_t> t) {
             return;
 
         auto name = member_name(d);
+        auto off = member_offset(d);
 
         if (mem.type < h.type_index_begin) {
-            fmt::print("    {} {};\n", builtin_type(mem.type), name);
+            members.emplace_back(fmt::format("    {} {};", builtin_type(mem.type), name), off);
             return;
         }
 
@@ -1035,8 +1038,26 @@ void pdb::print_struct(span<const uint8_t> t) {
 
         const auto& mt = types[mem.type - h.type_index_begin];
 
-        fmt::print("    {};\n", format_member(mt, name, "    "));
+        members.emplace_back(fmt::format("    {};", format_member(mt, name, "    ")), off);
     });
+
+    for (auto it = members.begin(); it != members.end(); it++) {
+        if (next(it) != members.end() && next(it)->second == it->second) {
+            fmt::print("    union {{\n");
+
+            while (true) {
+                fmt::print("    {}\n", it->first);
+
+                if (next(it) != members.end() && next(it)->second == it->second)
+                    it++;
+                else
+                    break;
+            }
+
+            fmt::print("    }};\n");
+        } else
+            fmt::print("{}\n", it->first);
+    }
 
     fmt::print("}};\n\n");
 }
@@ -1158,8 +1179,6 @@ void pdb::extract_types() {
             continue;
 
         auto kind = *(cv_type*)t.data();
-
-        // FIXME - implicit structs and unions
 
         try {
             switch (kind) {
