@@ -341,6 +341,22 @@ static string_view union_name(span<const uint8_t> t) {
     return name;
 }
 
+static string_view member_name(span<const uint8_t> t) {
+    const auto& mem = *(lf_member*)t.data();
+
+    size_t off = offsetof(lf_member, name);
+
+    if (mem.offset >= 0x8000)
+        off += extended_value_len((cv_type)mem.offset);
+
+    auto name = string_view((char*)&mem + off, t.size() - off);
+
+    if (auto st = name.find('\0'); st != string::npos)
+        name = name.substr(0, st);
+
+    return name;
+}
+
 string pdb::type_name(span<const uint8_t> t) {
     if (t.size() < sizeof(cv_type))
         throw formatted_error("Truncated type");
@@ -971,15 +987,7 @@ void pdb::print_struct(span<const uint8_t> t) {
         if (mem.kind != cv_type::LF_MEMBER)
             return;
 
-        size_t off = offsetof(lf_member, name);
-
-        if (mem.offset >= 0x8000)
-            off += extended_value_len((cv_type)mem.offset);
-
-        auto name = string_view((char*)&mem + off, d.size() - off);
-
-        if (auto st = name.find('\0'); st != string::npos)
-            name = name.substr(0, st);
+        auto name = member_name(d);
 
         if (mem.type < h.type_index_begin) {
             fmt::print("    {} {};\n", builtin_type(mem.type), name);
@@ -1027,15 +1035,7 @@ void pdb::print_union(span<const uint8_t> t) {
         if (mem.kind != cv_type::LF_MEMBER)
             return;
 
-        size_t off = offsetof(lf_member, name);
-
-        if (mem.offset >= 0x8000)
-            off += extended_value_len((cv_type)mem.offset);
-
-        auto name = string_view((char*)&mem + off, d.size() - off);
-
-        if (auto st = name.find('\0'); st != string::npos)
-            name = name.substr(0, st);
+        auto name = member_name(d);
 
         if (mem.type < h.type_index_begin) {
             fmt::print("    {} {};\n", builtin_type(mem.type), name);
