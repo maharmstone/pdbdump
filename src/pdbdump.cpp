@@ -13,7 +13,7 @@ public:
     void print_struct(span<const uint8_t> t);
     void print_union(span<const uint8_t> t);
     void print_enum(span<const uint8_t> t);
-    string format_member(span<const uint8_t> mt, string_view name);
+    string format_member(span<const uint8_t> mt, string_view name, string_view prefix);
     uint64_t get_type_size(uint32_t type);
     string type_name(span<const uint8_t> t);
     string arg_list_to_string(uint32_t arg_list);
@@ -688,13 +688,32 @@ string pdb::arg_list_to_string(uint32_t arg_list) {
 
         const auto& t2 = types[n - h.type_index_begin];
 
-        s += format_member(t2, "");
+        s += format_member(t2, "" ,"");
     }
 
     return s;
 }
 
-string pdb::format_member(span<const uint8_t> mt, string_view name) {
+static bool is_name_anonymous(string_view name) {
+    if (name == "<unnamed-tag>")
+        return true;
+
+    if (name == "__unnamed")
+        return true;
+
+    auto tag1 = "::<unnamed-tag>"sv;
+    auto tag2 = "::__unnamed"sv;
+
+    if (name.size() >= tag1.size() && name.substr(name.size() - tag1.size()) == tag1)
+        return true;
+
+    if (name.size() >= tag2.size() && name.substr(name.size() - tag2.size()) == tag2)
+        return true;
+
+    return false;
+}
+
+string pdb::format_member(span<const uint8_t> mt, string_view name, string_view prefix) {
     if (mt.size() >= sizeof(cv_type)) {
         switch (*(cv_type*)mt.data()) {
             case cv_type::LF_ARRAY: {
@@ -718,7 +737,7 @@ string pdb::format_member(span<const uint8_t> mt, string_view name) {
                     const auto& mt2 = types[arr->element_type - h.type_index_begin];
 
                     if (mt2.size() < sizeof(cv_type) || *(cv_type*)mt2.data() != cv_type::LF_ARRAY)
-                        return format_member(mt2, name2);
+                        return format_member(mt2, name2, prefix);
 
                     arr = (lf_array*)mt2.data();
 
@@ -782,7 +801,7 @@ string pdb::format_member(span<const uint8_t> mt, string_view name) {
 
                             const auto& rt = types[proc.return_type - h.type_index_begin];
 
-                            ret = format_member(rt, "");
+                            ret = format_member(rt, "", prefix);
                         }
 
                         return fmt::format("{} ({:*>{}}{})({})", ret, "", depth, name, arg_list_to_string(proc.arglist));
@@ -805,6 +824,61 @@ string pdb::format_member(span<const uint8_t> mt, string_view name) {
                         break;
                 } while (true);
 
+                break;
+            }
+
+            case cv_type::LF_UNION: {
+                if (mt.size() < offsetof(lf_union, name))
+                    break;
+
+                const auto& un = *(lf_union*)mt.data();
+
+                if (!is_name_anonymous(union_name(mt)))
+                    break;
+
+                if (un.field_list < h.type_index_begin || un.field_list >= h.type_index_end)
+                    break;
+
+                const auto& fl = types[un.field_list - h.type_index_begin];
+
+                auto s = fmt::format("union {{\n");
+
+                string prefix2{prefix};
+
+                prefix2 += "    ";
+
+                walk_fieldlist(fl, [&](span<const uint8_t> d) {
+                    const auto& mem = *(lf_member*)d.data();
+
+                    if (mem.kind != cv_type::LF_MEMBER)
+                        return;
+
+                    size_t off = offsetof(lf_member, name);
+
+                    if (mem.offset >= 0x8000)
+                        off += extended_value_len((cv_type)mem.offset);
+
+                    auto name = string_view((char*)&mem + off, d.size() - off);
+
+                    if (auto st = name.find('\0'); st != string::npos)
+                        name = name.substr(0, st);
+
+                    if (mem.type < h.type_index_begin) {
+                        s += fmt::format("{}{} {};\n", prefix2, builtin_type(mem.type), name);
+                        return;
+                    }
+
+                    if (mem.type >= h.type_index_end)
+                        throw formatted_error("Member type {:x} was out of bounds.", mem.type);
+
+                    const auto& mt = types[mem.type - h.type_index_begin];
+
+                    s += fmt::format("{}{};\n", prefix2, format_member(mt, name, prefix2));
+                });
+
+                s += fmt::format("{}}} {}", prefix, name);
+
+                return s;
             }
 
             default:
@@ -846,7 +920,6 @@ void pdb::print_struct(span<const uint8_t> t) {
     fmt::print("struct {} {{\n", name);
 
     // FIXME - anonymous structs
-    // FIXME - unions
 
     walk_fieldlist(fl, [&](span<const uint8_t> d) {
         const auto& mem = *(lf_member*)d.data();
@@ -874,7 +947,7 @@ void pdb::print_struct(span<const uint8_t> t) {
 
         const auto& mt = types[mem.type - h.type_index_begin];
 
-        fmt::print("    {};\n", format_member(mt, name));
+        fmt::print("    {};\n", format_member(mt, name, "    "));
     });
 
     fmt::print("}};\n\n");
@@ -903,7 +976,7 @@ void pdb::print_union(span<const uint8_t> t) {
 
     fmt::print("union {} {{\n", name);
 
-    // FIXME - anonymous structs and unions
+    // FIXME - anonymous structs
 
     walk_fieldlist(fl, [&](span<const uint8_t> d) {
         const auto& mem = *(lf_member*)d.data();
@@ -931,7 +1004,7 @@ void pdb::print_union(span<const uint8_t> t) {
 
         const auto& mt = types[mem.type - h.type_index_begin];
 
-        fmt::print("    {};\n", format_member(mt, name));
+        fmt::print("    {};\n", format_member(mt, name, "    "));
     });
 
     fmt::print("}};\n\n");
