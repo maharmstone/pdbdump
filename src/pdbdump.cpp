@@ -357,6 +357,42 @@ static string_view member_name(span<const uint8_t> t) {
     return name;
 }
 
+static uint64_t member_offset(span<const uint8_t> t) {
+    const auto& mem = *(lf_member*)t.data();
+
+    if (mem.offset < 0x8000)
+        return mem.offset;
+
+    if (t.size() < offsetof(lf_union, name) + extended_value_len((cv_type)mem.offset))
+        throw formatted_error("Member type was truncated.");
+
+    switch ((cv_type)mem.offset) {
+        case cv_type::LF_CHAR:
+            return *(int8_t*)&mem.name;
+
+        case cv_type::LF_SHORT:
+            return *(int16_t*)&mem.name;
+
+        case cv_type::LF_USHORT:
+            return *(uint16_t*)&mem.name;
+
+        case cv_type::LF_LONG:
+            return *(int32_t*)&mem.name;
+
+        case cv_type::LF_ULONG:
+            return *(uint32_t*)&mem.name;
+
+        case cv_type::LF_QUADWORD:
+            return *(int64_t*)&mem.name;
+
+        case cv_type::LF_UQUADWORD:
+            return *(uint64_t*)&mem.name;
+
+        default:
+            throw formatted_error("Could not parse member offset type {}\n", (cv_type)mem.offset);
+    }
+}
+
 string pdb::type_name(span<const uint8_t> t) {
     if (t.size() < sizeof(cv_type))
         throw formatted_error("Truncated type");
@@ -1027,6 +1063,8 @@ void pdb::print_union(span<const uint8_t> t) {
 
     auto name = union_name(t);
 
+    vector<pair<string, uint64_t>> members;
+
     fmt::print("union {} {{\n", name);
 
     walk_fieldlist(fl, [&](span<const uint8_t> d) {
@@ -1036,9 +1074,10 @@ void pdb::print_union(span<const uint8_t> t) {
             return;
 
         auto name = member_name(d);
+        auto off = member_offset(d);
 
         if (mem.type < h.type_index_begin) {
-            fmt::print("    {} {};\n", builtin_type(mem.type), name);
+            members.emplace_back(fmt::format("    {} {};", builtin_type(mem.type), name), off);
             return;
         }
 
@@ -1047,8 +1086,29 @@ void pdb::print_union(span<const uint8_t> t) {
 
         const auto& mt = types[mem.type - h.type_index_begin];
 
-        fmt::print("    {};\n", format_member(mt, name, "    "));
+        members.emplace_back(fmt::format("    {};", format_member(mt, name, "    ")), off);
     });
+
+    // FIXME - bitfields in implicit structs
+    // FIXME - unions within implicit structs?
+
+    for (auto it = members.begin(); it != members.end(); it++) {
+        if (next(it) != members.end() && next(it)->second != 0) {
+            fmt::print("    struct {{\n");
+
+            while (true) {
+                fmt::print("    {}\n", it->first);
+
+                if (next(it) != members.end() && next(it)->second != 0)
+                    it++;
+                else
+                    break;
+            }
+
+            fmt::print("    }};\n");
+        } else
+            fmt::print("{}\n", it->first);
+    }
 
     fmt::print("}};\n\n");
 }
