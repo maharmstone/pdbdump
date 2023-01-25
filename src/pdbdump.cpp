@@ -5,6 +5,16 @@
 
 using namespace std;
 
+struct sa {
+    sa(string_view name, uint64_t off) : name(name), off(off) { }
+
+    string name;
+    uint64_t off;
+};
+
+template<typename T>
+concept union_or_struct = std::is_same_v<T, lf_union> || std::is_same_v<T, lf_class>;
+
 class pdb {
 public:
     pdb(bfd* types_stream) : types_stream(types_stream) { }
@@ -17,6 +27,7 @@ public:
     uint64_t get_type_size(uint32_t type);
     string type_name(span<const uint8_t> t);
     string arg_list_to_string(uint32_t arg_list);
+    void add_asserts(const union_or_struct auto& d, string_view name, uint64_t off, vector<sa>& asserts);
 
 private:
     bfd* types_stream;
@@ -1025,6 +1036,70 @@ string pdb::format_member(span<const uint8_t> mt, string_view name, string_view 
         return fmt::format("{} {}", type_name(mt), name);
 }
 
+void pdb::add_asserts(const union_or_struct auto& d, string_view name, uint64_t off, vector<sa>& asserts) {
+    if (d.field_list < h.type_index_begin || d.field_list >= h.type_index_end)
+        throw formatted_error("Field list {:x} was out of bounds.", d.field_list);
+
+    const auto& fl = types[d.field_list - h.type_index_begin];
+
+    walk_fieldlist(fl, [&](span<const uint8_t> d) {
+        const auto& mem = *(lf_member*)d.data();
+
+        if (mem.kind != cv_type::LF_MEMBER)
+            return;
+
+        string mem_name{member_name(d)};
+
+        if (mem.type < h.type_index_begin) {
+            asserts.emplace_back(string{name} + "."s + mem_name, off + member_offset(d));
+            return;
+        }
+
+        if (mem.type >= h.type_index_end)
+            throw formatted_error("Member type {:x} was out of bounds.", mem.type);
+
+        const auto& mt = types[mem.type - h.type_index_begin];
+
+        if (mt.size() >= sizeof(cv_type)) {
+            switch (*(cv_type*)mt.data()) {
+                case cv_type::LF_BITFIELD:
+                    return;
+
+                case cv_type::LF_STRUCTURE:
+                case cv_type::LF_CLASS: {
+                    if (!is_name_anonymous(struct_name(mt))) {
+                        asserts.emplace_back(string{name} + "."s + mem_name, off + member_offset(d));
+                        break;
+                    }
+
+                    const auto& str = *(lf_class*)mt.data();
+
+                    add_asserts(str, string{name} + "."s + mem_name, off + member_offset(d), asserts);
+
+                    break;
+                }
+
+                case cv_type::LF_UNION: {
+                    if (!is_name_anonymous(union_name(mt))) {
+                        asserts.emplace_back(string{name} + "."s + mem_name, off + member_offset(d));
+                        return;
+                    }
+
+                    const auto& un = *(lf_union*)mt.data();
+
+                    add_asserts(un, string{name} + "."s + mem_name, off + member_offset(d), asserts);
+
+                    break;
+                }
+
+                default:
+                    asserts.emplace_back(string{name} + "."s + mem_name, off + member_offset(d));
+                    return;
+            }
+        }
+    });
+}
+
 void pdb::print_struct(span<const uint8_t> t) {
     struct memb {
         memb(string_view str, string_view name, uint64_t off, bool bitfield) :
@@ -1059,6 +1134,7 @@ void pdb::print_struct(span<const uint8_t> t) {
     auto name = struct_name(t);
 
     vector<memb> members;
+    vector<sa> asserts;
 
     // FIXME - "class" instead if LF_CLASS
     fmt::print("struct {} {{\n", name);
@@ -1074,6 +1150,7 @@ void pdb::print_struct(span<const uint8_t> t) {
 
         if (mem.type < h.type_index_begin) {
             members.emplace_back(fmt::format("    {} {};", builtin_type(mem.type), name), name, off, false);
+            asserts.emplace_back(name, off / 8);
             return;
         }
 
@@ -1083,11 +1160,47 @@ void pdb::print_struct(span<const uint8_t> t) {
         const auto& mt = types[mem.type - h.type_index_begin];
         bool bitfield = false;
 
-        if (mt.size() >= sizeof(lf_bitfield) && *(cv_type*)mt.data() == cv_type::LF_BITFIELD) {
-            const auto& bf = *(lf_bitfield*)mt.data();
+        if (mt.size() >= sizeof(cv_type)) {
+            switch (*(cv_type*)mt.data()) {
+                case cv_type::LF_BITFIELD: {
+                    const auto& bf = *(lf_bitfield*)mt.data();
 
-            off += bf.position;
-            bitfield = true;
+                    off += bf.position;
+                    bitfield = true;
+                    break;
+                }
+
+                case cv_type::LF_STRUCTURE:
+                case cv_type::LF_CLASS: {
+                    if (!is_name_anonymous(struct_name(mt))) {
+                        asserts.emplace_back(name, off / 8);
+                        break;
+                    }
+
+                    const auto& str = *(lf_class*)mt.data();
+
+                    add_asserts(str, name, off / 8, asserts);
+
+                    break;
+                }
+
+                case cv_type::LF_UNION: {
+                    if (!is_name_anonymous(union_name(mt))) {
+                        asserts.emplace_back(name, off / 8);
+                        break;
+                    }
+
+                    const auto& un = *(lf_union*)mt.data();
+
+                    add_asserts(un, name, off / 8, asserts);
+
+                    break;
+                }
+
+                default:
+                    asserts.emplace_back(name, off / 8);
+                    break;
+            }
         }
 
         members.emplace_back(fmt::format("    {};", format_member(mt, name, "    ")), name, off, bitfield);
@@ -1115,13 +1228,8 @@ void pdb::print_struct(span<const uint8_t> t) {
 
     fmt::print("static_assert(sizeof({}) == 0x{:x});\n", name, struct_length(t));
 
-    for (const auto& m : members) {
-        if (m.bitfield)
-            continue;
-
-        // FIXME - members of anonymous structs
-
-        fmt::print("static_assert(offsetof({}, {}) == 0x{:x});\n", name, m.name, m.off / 8);
+    for (const auto& a : asserts) {
+        fmt::print("static_assert(offsetof({}, {}) == 0x{:x});\n", name, a.name, a.off);
     }
 
     fmt::print("\n");
