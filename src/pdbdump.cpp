@@ -1207,21 +1207,21 @@ void pdb::print_union(span<const uint8_t> t) {
 
 void pdb::extract_types() {
     if (bfd_seek(types_stream, 0, SEEK_SET))
-        throw runtime_error("bfd_seek failed");
+        throw formatted_error("bfd_seek failed ({})", bfd_errmsg(bfd_get_error()));
 
     if (bfd_bread(&h, sizeof(h), types_stream) != sizeof(h))
-        throw runtime_error("bfd_bread failed");
+        throw formatted_error("bfd_bread failed ({})", bfd_errmsg(bfd_get_error()));
 
     if (h.version != TPI_STREAM_VERSION_80)
         throw formatted_error("Type stream version was {}, expected {}.", h.version, TPI_STREAM_VERSION_80);
 
     if (bfd_seek(types_stream, h.header_size, SEEK_SET))
-        throw runtime_error("bfd_seek failed");
+        throw formatted_error("bfd_seek failed ({})", bfd_errmsg(bfd_get_error()));
 
     type_records.resize(h.type_record_bytes);
 
     if (bfd_bread(type_records.data(), type_records.size(), types_stream) != type_records.size())
-        throw runtime_error("bfd_bread failed");
+        throw formatted_error("bfd_bread failed ({})", bfd_errmsg(bfd_get_error()));
 
     span sp(type_records);
 
@@ -1280,19 +1280,17 @@ void pdb::extract_types() {
 static void load_file(const string& fn) {
     bfdup b;
 
-    // FIXME - show BFD errors in exceptions
-
     {
         auto arch = bfd_openr(fn.c_str(), "pdb");
 
         if (!arch)
-            throw runtime_error("Could not load PDB file " + fn + ".");
+            throw formatted_error("Could not load PDB file {} ({}).", fn, bfd_errmsg(bfd_get_error()));
 
         b.reset(arch);
     }
 
     if (!bfd_check_format(b.get(), bfd_archive))
-        throw runtime_error("bfd_check_format failed");
+        throw formatted_error("bfd_check_format failed ({})", bfd_errmsg(bfd_get_error()));
 
     bfd* types_stream = nullptr;
     unsigned int count = 0;
