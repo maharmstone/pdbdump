@@ -1420,13 +1420,18 @@ static void load_file(const string& fn) {
     p.extract_types();
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     try {
-        // FIXME - show options if no args
-        // FIXME - get filename from args
+        if (argc < 2) {
+            fmt::print(stderr, "Usage: pdbout <file>\n");
+            return 1;
+        }
+
+        auto fn = string{argv[1]};
+
         // FIXME - if filename is PE image, lookup PDB file on symbol servers
 
-        load_file("ntkrnlmp.pdb");
+        load_file(fn);
     } catch (const exception& e) {
         cerr << "Exception: " << e.what() << endl;
         return 1;
