@@ -1407,7 +1407,27 @@ static void parse_image(bfd* b) {
     if (pe.Signature != IMAGE_NT_SIGNATURE)
         throw formatted_error("PE Signature was {:08x}, expected {:08x}", pe.Signature, IMAGE_NT_SIGNATURE);
 
-    // FIXME - read directories
+    span<const IMAGE_DATA_DIRECTORY> dirs;
+
+    if (pe.OptionalHeader32.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+        dirs = span(pe.OptionalHeader32.DataDirectory, pe.OptionalHeader32.NumberOfRvaAndSizes);
+    else if (pe.OptionalHeader32.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        dirs = span(pe.OptionalHeader64.DataDirectory, pe.OptionalHeader64.NumberOfRvaAndSizes);
+    else
+        throw formatted_error("PE Magic was {:04x}, expected {:04x} or {:04x}", pe.OptionalHeader32.Magic,
+                              IMAGE_NT_OPTIONAL_HDR32_MAGIC, IMAGE_NT_OPTIONAL_HDR64_MAGIC);
+
+    if (dirs.size() <= IMAGE_DIRECTORY_ENTRY_DEBUG)
+        throw runtime_error("Image did not contain a IMAGE_DIRECTORY_ENTRY_DEBUG directory.");
+
+    const auto& dd = dirs[IMAGE_DIRECTORY_ENTRY_DEBUG];
+
+    if (dd.Size == 0)
+        throw runtime_error("Image did not contain a IMAGE_DIRECTORY_ENTRY_DEBUG directory.");
+
+    fmt::print("VirtualAddress = {:x}, Size = {:x}\n", dd.VirtualAddress, dd.Size);
+
+    // FIXME - parse debug directory
 
     throw runtime_error("!");
 }

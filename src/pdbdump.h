@@ -60,6 +60,8 @@ struct IMAGE_DATA_DIRECTORY {
     uint32_t Size;
 };
 
+static constexpr unsigned int IMAGE_DIRECTORY_ENTRY_DEBUG = 6;
+
 struct IMAGE_OPTIONAL_HEADER32 {
     uint16_t Magic;
     uint8_t MajorLinkerVersion;
@@ -91,7 +93,7 @@ struct IMAGE_OPTIONAL_HEADER32 {
     uint32_t SizeOfHeapCommit;
     uint32_t LoaderFlags;
     uint32_t NumberOfRvaAndSizes;
-    IMAGE_DATA_DIRECTORY DataDirectory[0];
+    IMAGE_DATA_DIRECTORY DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG + 1];
 };
 
 struct IMAGE_OPTIONAL_HEADER64 {
@@ -124,7 +126,7 @@ struct IMAGE_OPTIONAL_HEADER64 {
     uint64_t SizeOfHeapCommit;
     uint32_t LoaderFlags;
     uint32_t NumberOfRvaAndSizes;
-    IMAGE_DATA_DIRECTORY DataDirectory[0];
+    IMAGE_DATA_DIRECTORY DataDirectory[IMAGE_DIRECTORY_ENTRY_DEBUG + 1];
 };
 
 enum class pe_architecture : uint16_t {
