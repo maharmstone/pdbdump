@@ -1385,11 +1385,38 @@ void pdb::extract_types() {
     }
 }
 
+static void parse_image(bfd* b) {
+    IMAGE_DOS_HEADER dh;
+    IMAGE_NT_HEADERS pe;
+
+    if (bfd_seek(b, 0, SEEK_SET))
+        throw formatted_error("bfd_seek failed ({})", bfd_errmsg(bfd_get_error()));
+
+    if (bfd_bread(&dh, sizeof(dh), b) != sizeof(dh))
+        throw formatted_error("bfd_bread failed ({})", bfd_errmsg(bfd_get_error()));
+
+    if (dh.e_magic != IMAGE_DOS_SIGNATURE)
+        throw formatted_error("e_magic was {:04x}, expected {:04x}", dh.e_magic, IMAGE_DOS_SIGNATURE);
+
+    if (bfd_seek(b, dh.e_lfanew, SEEK_SET))
+        throw formatted_error("bfd_seek failed ({})", bfd_errmsg(bfd_get_error()));
+
+    if (bfd_bread(&pe, sizeof(pe), b) != sizeof(pe))
+        throw formatted_error("bfd_bread failed ({})", bfd_errmsg(bfd_get_error()));
+
+    if (pe.Signature != IMAGE_NT_SIGNATURE)
+        throw formatted_error("PE Signature was {:08x}, expected {:08x}", pe.Signature, IMAGE_NT_SIGNATURE);
+
+    // FIXME - read directories
+
+    throw runtime_error("!");
+}
+
 static void load_file(const string& fn) {
     bfdup b;
 
     {
-        auto arch = bfd_openr(fn.c_str(), "pdb");
+        auto arch = bfd_openr(fn.c_str(), nullptr);
 
         if (!arch)
             throw formatted_error("Could not load PDB file {} ({}).", fn, bfd_errmsg(bfd_get_error()));
@@ -1397,8 +1424,15 @@ static void load_file(const string& fn) {
         b.reset(arch);
     }
 
+    if (bfd_check_format(b.get(), bfd_object)) {
+        parse_image(b.get());
+        return;
+    }
+
     if (!bfd_check_format(b.get(), bfd_archive))
         throw formatted_error("bfd_check_format failed ({})", bfd_errmsg(bfd_get_error()));
+
+    // FIXME - check format is PDB
 
     bfd* types_stream = nullptr;
     unsigned int count = 0;
