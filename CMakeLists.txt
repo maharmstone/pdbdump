@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
 find_package(fmt REQUIRED)
+find_package(CURL REQUIRED)
 
 set(SRC_FILES
 	src/pdbdump.cpp)
@@ -20,5 +21,8 @@ endif()
 add_definitions(-DPACKAGE)
 add_definitions(-DPACKAGE_VERSION)
 
+target_include_directories(pdbdump PUBLIC "${CURL_INCLUDE_DIRS}")
+
 target_link_libraries(pdbdump bfd)
 target_link_libraries(pdbdump fmt::fmt-header-only)
+target_link_libraries(pdbdump ${CURL_LIBRARIES})

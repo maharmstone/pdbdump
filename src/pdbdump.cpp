@@ -2,6 +2,8 @@
 #include <vector>
 #include <span>
 #include <filesystem>
+#include <curl/curl.h>
+#include <fstream>
 #include "pdbdump.h"
 
 using namespace std;
@@ -1521,6 +1523,68 @@ static filesystem::path xdg_cache_dir() {
     return p;
 }
 
+static size_t curl_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    auto& h = *(ofstream*)userdata;
+
+    h.write(ptr, size * nmemb);
+
+    return size * nmemb;
+}
+
+static void download_file(const string& url, const filesystem::path& dest) {
+    CURL* curl;
+    CURLcode res;
+
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
+    try {
+        curl = curl_easy_init();
+
+        if (!curl)
+            throw runtime_error("Failed to initialize cURL.");
+
+        try {
+            long error_code;
+
+            {
+                ofstream h(dest, ios::binary);
+
+                if (!h.good())
+                    throw formatted_error("Could not open {} for writing.", dest.string());
+
+                h.exceptions(ofstream::failbit | ofstream::badbit);
+
+                curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+                curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+                curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, ""); // everything that libcurl supports
+
+                curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+                curl_easy_setopt(curl, CURLOPT_WRITEDATA, &h);
+
+                res = curl_easy_perform(curl);
+
+                if (res != CURLE_OK)
+                    throw runtime_error(curl_easy_strerror(res));
+            }
+
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &error_code); // FIXME - only do if HTTP or HTTPS?
+
+            if (error_code >= 400)
+                throw formatted_error("HTTP error {}", error_code);
+        } catch (...) {
+            curl_easy_cleanup(curl);
+            throw;
+        }
+
+        curl_easy_cleanup(curl);
+    } catch (...) {
+        curl_global_cleanup();
+        throw;
+    }
+
+    curl_global_cleanup();
+}
+
 static bfdup load_pdb(span<const uint8_t, 16> sig, uint32_t age, string_view name) {
     auto hexstr = fmt::format("{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:X}",
                               sig[3], sig[2], sig[1], sig[0], sig[5], sig[4], sig[7], sig[6],
@@ -1533,8 +1597,10 @@ static bfdup load_pdb(span<const uint8_t, 16> sig, uint32_t age, string_view nam
             throw formatted_error("Failed to create directory {}.", cache_dir.string());
     }
 
-    if (filesystem::exists(cache_dir / name / hexstr / name)) {
-        auto fn = cache_dir / name / hexstr / name;
+    auto fn = cache_dir / name / hexstr / name;
+
+    if (filesystem::exists(fn)) {
+        fmt::print(stderr, "Using cached file at {}\n", fn.string());
 
         auto pdb = bfd_openr(fn.string().c_str(), nullptr);
 
@@ -1544,11 +1610,23 @@ static bfdup load_pdb(span<const uint8_t, 16> sig, uint32_t age, string_view nam
         return bfdup{pdb};
     }
 
-    // FIXME - download if not present
+    filesystem::create_directories(cache_dir / name / hexstr);
 
-    fmt::print("hexstr = {}, cache_dir = {}\n", hexstr, cache_dir.string());
+    auto url = fmt::format("https://msdl.microsoft.com/download/symbols/{}/{}/{}",
+                           name, hexstr, name);
 
-    return {};
+    fmt::print(stderr, "Trying to download from {}\n", url);
+
+    download_file(url, fn);
+
+    fmt::print(stderr, "Saved to {}\n", fn.string());
+
+    auto pdb = bfd_openr(fn.string().c_str(), nullptr);
+
+    if (!pdb)
+        throw formatted_error("Could not load PDB file {} ({}).", fn.string(), bfd_errmsg(bfd_get_error()));
+
+    return bfdup{pdb};
 }
 
 static void load_file(const string& fn) {
@@ -1613,13 +1691,12 @@ static void load_file(const string& fn) {
 int main(int argc, char* argv[]) {
     try {
         if (argc < 2) {
-            fmt::print(stderr, "Usage: pdbout <file>\n");
+            fmt::print(stderr, "Usage: pdbout <PDB file>\n");
+            fmt::print(stderr, "Usage: pdbout <PE image>\n");
             return 1;
         }
 
         auto fn = string{argv[1]};
-
-        // FIXME - if filename is PE image, lookup PDB file on symbol servers
 
         load_file(fn);
     } catch (const exception& e) {
