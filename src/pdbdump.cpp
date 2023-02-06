@@ -1389,6 +1389,13 @@ static void parse_image(bfd* b) {
     IMAGE_DOS_HEADER dh;
     IMAGE_NT_HEADERS pe;
 
+    struct map_ctx {
+        const IMAGE_DATA_DIRECTORY* dd;
+        uint64_t base;
+        exception_ptr exc;
+        vector<uint8_t> dir;
+    };
+
     if (bfd_seek(b, 0, SEEK_SET))
         throw formatted_error("bfd_seek failed ({})", bfd_errmsg(bfd_get_error()));
 
@@ -1407,13 +1414,16 @@ static void parse_image(bfd* b) {
     if (pe.Signature != IMAGE_NT_SIGNATURE)
         throw formatted_error("PE Signature was {:08x}, expected {:08x}", pe.Signature, IMAGE_NT_SIGNATURE);
 
+    map_ctx ctx;
     span<const IMAGE_DATA_DIRECTORY> dirs;
 
-    if (pe.OptionalHeader32.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+    if (pe.OptionalHeader32.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
         dirs = span(pe.OptionalHeader32.DataDirectory, pe.OptionalHeader32.NumberOfRvaAndSizes);
-    else if (pe.OptionalHeader32.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+        ctx.base = pe.OptionalHeader32.ImageBase;
+    } else if (pe.OptionalHeader32.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
         dirs = span(pe.OptionalHeader64.DataDirectory, pe.OptionalHeader64.NumberOfRvaAndSizes);
-    else
+        ctx.base = pe.OptionalHeader64.ImageBase;
+    } else
         throw formatted_error("PE Magic was {:04x}, expected {:04x} or {:04x}", pe.OptionalHeader32.Magic,
                               IMAGE_NT_OPTIONAL_HDR32_MAGIC, IMAGE_NT_OPTIONAL_HDR64_MAGIC);
 
@@ -1425,9 +1435,40 @@ static void parse_image(bfd* b) {
     if (dd.Size == 0)
         throw runtime_error("Image did not contain a IMAGE_DIRECTORY_ENTRY_DEBUG directory.");
 
-    fmt::print("VirtualAddress = {:x}, Size = {:x}\n", dd.VirtualAddress, dd.Size);
+    ctx.dd = &dd;
 
-    // FIXME - parse debug directory
+    bfd_map_over_sections(b, [](bfd* b, asection* sect, void* obj) {
+        auto& ctx = *(map_ctx*)obj;
+
+        if (ctx.exc || !ctx.dir.empty())
+            return;
+
+        try {
+            if (sect->vma > ctx.base + ctx.dd->VirtualAddress)
+                return;
+
+            if (sect->vma + sect->size <= ctx.base + ctx.dd->VirtualAddress)
+                return;
+
+            ctx.dir.resize(ctx.dd->Size);
+
+            bfd_byte* data = nullptr;
+
+            if (!bfd_get_full_section_contents(b, sect, &data))
+                throw formatted_error("bfd_get_full_section_contents failed ({})", bfd_errmsg(bfd_get_error()));
+
+            memcpy(ctx.dir.data(), data + ctx.dd->VirtualAddress + ctx.base - sect->vma, ctx.dd->Size);
+
+            free(data);
+        } catch (...) {
+            ctx.exc = current_exception();
+        }
+    }, &ctx);
+
+    if (ctx.exc)
+        rethrow_exception(ctx.exc);
+
+    // FIXME - parse ctx.dir
 
     throw runtime_error("!");
 }
