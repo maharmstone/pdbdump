@@ -215,6 +215,15 @@ struct IMAGE_DEBUG_DIRECTORY {
 
 static constexpr uint32_t IMAGE_DEBUG_TYPE_CODEVIEW = 2;
 
+struct CV_INFO_PDB70 {
+    uint32_t CvSignature;
+    uint8_t Signature[16];
+    uint32_t Age;
+    char PdbFileName[];
+};
+
+static constexpr uint32_t CVINFO_PDB70_CVSIGNATURE = 0x53445352;
+
 enum class cv_type : uint16_t {
     LF_VTSHAPE = 0x000a,
     LF_MODIFIER = 0x1001,

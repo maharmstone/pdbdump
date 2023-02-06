@@ -1497,6 +1497,12 @@ static vector<uint8_t> read_image_rsds(bfd* b) {
     return rsds;
 }
 
+static void load_pdb(span<const uint8_t, 16> sig, uint32_t age, string_view name) {
+    // FIXME - check cache for PDB
+    // FIXME - download if not present
+    // FIXME - open PDB
+}
+
 static void load_file(const string& fn) {
     bfdup b;
 
@@ -1510,12 +1516,22 @@ static void load_file(const string& fn) {
     }
 
     if (bfd_check_format(b.get(), bfd_object)) {
-        auto rsds = read_image_rsds(b.get());
+        auto vec = read_image_rsds(b.get());
 
-        // FIXME - parse RSDS
-        // FIXME - check cache for PDB
-        // FIXME - download if not present
-        // FIXME - open PDB
+        if (vec.size() < offsetof(CV_INFO_PDB70, PdbFileName))
+            throw formatted_error("CV debug info was {} bytes, expected at least {}.", vec.size(), offsetof(CV_INFO_PDB70, PdbFileName));
+
+        const auto& rsds = *(CV_INFO_PDB70*)vec.data();
+
+        if (rsds.CvSignature != CVINFO_PDB70_CVSIGNATURE)
+            throw formatted_error("CV signature was {:x}, expected {:x}.", rsds.CvSignature, CVINFO_PDB70_CVSIGNATURE);
+
+        auto name = string_view(rsds.PdbFileName, vec.size() - offsetof(CV_INFO_PDB70, PdbFileName));
+
+        if (auto st = name.find('\0'); st != string::npos)
+            name = name.substr(0, st);
+
+        load_pdb(rsds.Signature, rsds.Age, name);
 
         return;
     }
