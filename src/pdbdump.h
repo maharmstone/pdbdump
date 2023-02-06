@@ -202,6 +202,19 @@ struct IMAGE_NT_HEADERS {
 
 static constexpr uint32_t IMAGE_NT_SIGNATURE = 0x00004550; // "PE\0\0"
 
+struct IMAGE_DEBUG_DIRECTORY {
+    uint32_t Characteristics;
+    uint32_t TimeDateStamp;
+    uint16_t MajorVersion;
+    uint16_t MinorVersion;
+    uint32_t Type;
+    uint32_t SizeOfData;
+    uint32_t AddressOfRawData;
+    uint32_t PointerToRawData;
+};
+
+static constexpr uint32_t IMAGE_DEBUG_TYPE_CODEVIEW = 2;
+
 enum class cv_type : uint16_t {
     LF_VTSHAPE = 0x000a,
     LF_MODIFIER = 0x1001,

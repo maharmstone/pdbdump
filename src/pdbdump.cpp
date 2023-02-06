@@ -1468,6 +1468,24 @@ static void parse_image(bfd* b) {
     if (ctx.exc)
         rethrow_exception(ctx.exc);
 
+    span<const IMAGE_DEBUG_DIRECTORY> dbginfo;
+    const IMAGE_DEBUG_DIRECTORY* cvinfo = nullptr;
+
+    dbginfo = span((IMAGE_DEBUG_DIRECTORY*)ctx.dir.data(), ctx.dir.size() / sizeof(IMAGE_DEBUG_DIRECTORY));
+
+    for (const auto& d : dbginfo) {
+        if (d.Type != IMAGE_DEBUG_TYPE_CODEVIEW)
+            continue;
+
+        cvinfo = &d;
+        break;
+    }
+
+    if (!cvinfo)
+        throw runtime_error("Image does not contain CodeView debug information.");
+
+    fmt::print("Characteristics {:x}, TimeDateStamp {:x}, MajorVersion {:x}, MinorVersion {:x}, Type {:x}, SizeOfData {:x}, AddressOfRawData {:x}, PointerToRawData {:x}\n", cvinfo->Characteristics, cvinfo->TimeDateStamp, cvinfo->MajorVersion, cvinfo->MinorVersion, cvinfo->Type, cvinfo->SizeOfData, cvinfo->AddressOfRawData, cvinfo->PointerToRawData);
+
     // FIXME - parse ctx.dir
 
     throw runtime_error("!");
