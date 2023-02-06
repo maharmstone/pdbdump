@@ -791,13 +791,20 @@ static bool is_name_anonymous(string_view name) {
     if (name == "__unnamed")
         return true;
 
+    if (name == "<anonymous-tag>")
+        return true;
+
     auto tag1 = "::<unnamed-tag>"sv;
     auto tag2 = "::__unnamed"sv;
+    auto tag3 = "::<anonymous-tag>"sv;
 
     if (name.size() >= tag1.size() && name.substr(name.size() - tag1.size()) == tag1)
         return true;
 
     if (name.size() >= tag2.size() && name.substr(name.size() - tag2.size()) == tag2)
+        return true;
+
+    if (name.size() >= tag3.size() && name.substr(name.size() - tag3.size()) == tag3)
         return true;
 
     return false;
