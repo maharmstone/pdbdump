@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <span>
+#include <filesystem>
 #include "pdbdump.h"
 
 using namespace std;
@@ -1497,10 +1498,50 @@ static vector<uint8_t> read_image_rsds(bfd* b) {
     return rsds;
 }
 
-static void load_pdb(span<const uint8_t, 16> sig, uint32_t age, string_view name) {
-    // FIXME - check cache for PDB
+static filesystem::path xdg_cache_dir() {
+    if (auto s = getenv("XDG_CACHE_HOME"))
+        return s;
+
+    auto s = getenv("HOME");
+
+    if (!s)
+        throw runtime_error("HOME environment variable not set.");
+
+    auto p = filesystem::path{s};
+
+    p /= ".cache";
+
+    return p;
+}
+
+static bfdup load_pdb(span<const uint8_t, 16> sig, uint32_t age, string_view name) {
+    auto hexstr = fmt::format("{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}{:X}",
+                              sig[3], sig[2], sig[1], sig[0], sig[5], sig[4], sig[7], sig[6],
+                              sig[8], sig[9], sig[10], sig[11], sig[12], sig[13], sig[14], sig[15], age);
+
+    auto cache_dir = xdg_cache_dir() / "pdb";
+
+    if (!filesystem::exists(cache_dir)) {
+        if (!filesystem::create_directory(cache_dir))
+            throw formatted_error("Failed to create directory {}.", cache_dir.string());
+    }
+
+    if (filesystem::exists(cache_dir / name / hexstr / name)) {
+        auto fn = cache_dir / name / hexstr / name;
+
+        auto pdb = bfd_openr(fn.string().c_str(), nullptr);
+
+        if (!pdb)
+            throw formatted_error("Could not load PDB file {} ({}).", fn.string(), bfd_errmsg(bfd_get_error()));
+
+        return bfdup{pdb};
+    }
+
     // FIXME - download if not present
-    // FIXME - open PDB
+
+    fmt::print("hexstr = {}, cache_dir = {}\n", hexstr, cache_dir.string());
+
+    return {};
 }
 
 static void load_file(const string& fn) {
@@ -1531,9 +1572,10 @@ static void load_file(const string& fn) {
         if (auto st = name.find('\0'); st != string::npos)
             name = name.substr(0, st);
 
-        load_pdb(rsds.Signature, rsds.Age, name);
+        auto pdb = load_pdb(rsds.Signature, rsds.Age, name);
 
-        return;
+        if (bfd_check_format(pdb.get(), bfd_archive))
+            b.swap(pdb);
     }
 
     if (!bfd_check_format(b.get(), bfd_archive))
