@@ -1385,7 +1385,7 @@ void pdb::extract_types() {
     }
 }
 
-static void parse_image(bfd* b) {
+static vector<uint8_t> read_image_rsds(bfd* b) {
     IMAGE_DOS_HEADER dh;
     IMAGE_NT_HEADERS pe;
 
@@ -1484,11 +1484,17 @@ static void parse_image(bfd* b) {
     if (!cvinfo)
         throw runtime_error("Image does not contain CodeView debug information.");
 
-    fmt::print("Characteristics {:x}, TimeDateStamp {:x}, MajorVersion {:x}, MinorVersion {:x}, Type {:x}, SizeOfData {:x}, AddressOfRawData {:x}, PointerToRawData {:x}\n", cvinfo->Characteristics, cvinfo->TimeDateStamp, cvinfo->MajorVersion, cvinfo->MinorVersion, cvinfo->Type, cvinfo->SizeOfData, cvinfo->AddressOfRawData, cvinfo->PointerToRawData);
+    if (bfd_seek(b, cvinfo->PointerToRawData, SEEK_SET))
+        throw formatted_error("bfd_seek failed ({})", bfd_errmsg(bfd_get_error()));
 
-    // FIXME - parse ctx.dir
+    vector<uint8_t> rsds;
 
-    throw runtime_error("!");
+    rsds.resize(cvinfo->SizeOfData);
+
+    if (bfd_bread(rsds.data(), rsds.size(), b) != rsds.size())
+        throw formatted_error("bfd_bread failed ({})", bfd_errmsg(bfd_get_error()));
+
+    return rsds;
 }
 
 static void load_file(const string& fn) {
@@ -1504,7 +1510,13 @@ static void load_file(const string& fn) {
     }
 
     if (bfd_check_format(b.get(), bfd_object)) {
-        parse_image(b.get());
+        auto rsds = read_image_rsds(b.get());
+
+        // FIXME - parse RSDS
+        // FIXME - check cache for PDB
+        // FIXME - download if not present
+        // FIXME - open PDB
+
         return;
     }
 
